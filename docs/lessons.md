@@ -107,6 +107,14 @@ Things that cost time once; check here before debugging something similar.
   prompt position back from the cursor after each insert (output came out
   of order and commands were sent with the prompt). In modifyVerify,
   newInsert starts as the cursor, and callbacks may move startPos/endPos.
+- Qt only routes input method text to widgets with
+  Qt::WA_InputMethodEnabled; without it dead keys and compose type nothing.
+  Commits are easiest to deliver as ordinary key presses.
+- Athena's international text widget finds its input context through the
+  "shellext" object Xaw's Vendor.c creates in every vendor shell; without
+  it XawIm falls back to XLookupString and widens bytes to wide characters
+  one by one.
+- A test's check must run before MOTIFQT_AUTOQUIT, or it passes unseen.
 - A destroyed widget's Qt object goes with deleteLater, its record at once:
   detach the event bridge and drop the window id, or events posted in
   between read freed memory (glibc survived it, musl crashed; valgrind

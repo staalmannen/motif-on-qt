@@ -20,14 +20,3 @@ void XawTipDisable (Widget w)
   mq_set_tooltip (w, NULL);
 }
 
-/* libXaw's Vendor shell extension sizes the input method's status area;
- * there is no input method here (XOpenIM fails), so nothing to size */
-void XawVendorShellExtResize (Widget w)
-{
-  (void) w;
-}
-
-void XawVendorStructureNotifyHandler (Widget w, XtPointer closure, XEvent *event, Boolean *cont)
-{
-  (void) w; (void) closure; (void) event; (void) cont;
-}

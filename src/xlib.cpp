@@ -2245,7 +2245,7 @@ QByteArray mq_mb_encode (const QString &s)
 /* ---------- font sets, input methods (Athena text widgets) ----------
  * A font set is one Qt font: Qt finds glyphs for every script itself.
  * Multibyte strings are in the locale's encoding, wide strings wchar_t.
- * There is no X input method; Qt delivers composed text as key events. */
+ * Input methods are in xim.cpp. */
 struct _XOC {
   XFontStruct *fs;
   char *base;
@@ -2382,23 +2382,6 @@ void XwcFreeStringList (wchar_t **list)
   for (wchar_t **p = list; *p; p++) free (*p);
   free (list);
 }
-
-/* no input method server: programs fall back to XLookupString */
-XIM XOpenIM (Display *, struct _XrmHashBucketRec *, char *, char *) { return nullptr; }
-Status XCloseIM (XIM) { return 1; }
-Display *XDisplayOfIM (XIM) { return mq_display; }
-char *XGetIMValues (XIM, ...) { return (char *) "unsupported"; }
-char *XSetIMValues (XIM, ...) { return (char *) "unsupported"; }
-XIC XCreateIC (XIM, ...) { return nullptr; }
-void XDestroyIC (XIC) {}
-void XSetICFocus (XIC) {}
-void XUnsetICFocus (XIC) {}
-char *XGetICValues (XIC, ...) { return (char *) "unsupported"; }
-char *XSetICValues (XIC, ...) { return (char *) "unsupported"; }
-XIM XIMOfIC (XIC) { return nullptr; }
-Bool XFilterEvent (XEvent *, Window) { return False; }
-Bool XRegisterIMInstantiateCallback (Display *, struct _XrmHashBucketRec *, char *, char *, XIDProc, XPointer) { return False; }
-Bool XUnregisterIMInstantiateCallback (Display *, struct _XrmHashBucketRec *, char *, char *, XIDProc, XPointer) { return False; }
 
 /* the text of a key press, for the Xmb/Xutf8/Xwc lookups; a buffer that
  * is too small gets nothing and XBufferOverflow with the size needed */

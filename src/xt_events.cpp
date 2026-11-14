@@ -458,6 +458,12 @@ static void enable_input (Widget w, EventMask m)
   if (m & (PointerMotionMask | ButtonMotionMask | Button1MotionMask | Button2MotionMask | Button3MotionMask))
     qw->setMouseTracking (m & PointerMotionMask);
   if ((m & (KeyPressMask | KeyReleaseMask)) && qw->focusPolicy () == Qt::NoFocus) qw->setFocusPolicy (Qt::StrongFocus);
+  /* program widgets (canvases: no Qt class of their own) that read keys
+   * take part in the input method; Qt's own widgets (XmText ...) handle it
+   * themselves */
+  if ((m & (KeyPressMask | KeyReleaseMask)) && !qw->testAttribute (Qt::WA_InputMethodEnabled) &&
+      qstrcmp (qw->metaObject ()->className (), "QWidget") == 0)
+    mq_im_enable (qw);
   if (m & (EnterWindowMask | LeaveWindowMask)) qw->setAttribute (Qt::WA_Hover);
 }
 

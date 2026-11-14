@@ -25,7 +25,8 @@ quit"` (see docs/testing.md).
   classes), `src/xlib.cpp` Xlib on QPainter, `src/xm_*.cpp` Motif widgets
 - `src/xaw/`, `src/xmu/` genuine libXaw 1.0.16 / libXmu 1.1.3 sources (MIT),
   unmodified, run as foreign classes on our Xt (`src/xaw/xaw_tip.c` and
-  `config.h` are ours); `src/xpm.cpp` the Xpm API
+  `config.h` are ours; Vendor.c is built with its VendorShell renamed);
+  `src/xpm.cpp` the Xpm API; `src/xim.cpp` input methods (XIM, XmIm)
 - `examples/` Motif's own demos, unmodified; `tests/` our regression programs
 
 ## Conventions

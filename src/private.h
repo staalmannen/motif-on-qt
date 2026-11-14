@@ -311,6 +311,11 @@ QString mq_decode_mixed (const QByteArray &b);
  * event applied (Control) (xlib.cpp) */
 uint mq_keysym_ucs (KeySym k);
 uint mq_keysym_text (KeySym k, unsigned state);
+/* input methods for program widgets (xim.cpp) */
+class QInputMethodEvent;
+bool mq_im_query (QWidget *qw, Qt::InputMethodQuery q, QVariant *out);
+void mq_im_event (QWidget *qw, QInputMethodEvent *e);
+void mq_im_enable (QWidget *qw);
 
 /* Xlib side (xlib.cpp) */
 QFont mq_font_from_xlfd (const QString &name, bool *ok);

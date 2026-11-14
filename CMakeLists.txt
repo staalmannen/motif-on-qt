@@ -32,18 +32,22 @@ set (MQ_SOURCES
   src/xt_selection.cpp
   src/mq_script.cpp
   src/xt_foreign.cpp
-  src/xpm.cpp)
+  src/xpm.cpp
+  src/xim.cpp)
 
 # Xmu and the Athena widgets: the genuine MIT sources of libXmu 1.1.3 and
 # libXaw 1.0.16, running on our Xt like a program's own widget classes
 file (GLOB MQ_XMU_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/xmu/*.c)
-# all of libXaw but Vendor.c (Motif's vendor shell stays) and Tip.c (tips
-# are Qt tooltips, src/xaw/xaw_tip.c)
+# all of libXaw but Tip.c (tips are Qt tooltips, src/xaw/xaw_tip.c). Vendor.c
+# is built for its shell extension (Athena's input method support), with its
+# VendorShell class renamed: Motif's VendorShell stays the real one
 file (GLOB MQ_XAW_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/xaw/*.c)
 set_source_files_properties (${MQ_XMU_SOURCES} PROPERTIES
   INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/src/xmu;${CMAKE_CURRENT_SOURCE_DIR}/include/X11/Xmu" COMPILE_OPTIONS "-w;-DHAVE_CONFIG_H")
 set_source_files_properties (${MQ_XAW_SOURCES} PROPERTIES
   INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/src/xaw COMPILE_OPTIONS "-w;-DHAVE_CONFIG_H")
+set_property (SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/xaw/Vendor.c APPEND PROPERTY COMPILE_DEFINITIONS
+  vendorShellClassRec=_mq_xaw_vendorShellClassRec vendorShellWidgetClass=_mq_xaw_vendorShellWidgetClass)
 list (APPEND MQ_SOURCES ${MQ_XMU_SOURCES} ${MQ_XAW_SOURCES})
 set (MQ_WARNINGS -Wall -Wno-unused-parameter $<$<COMPILE_LANGUAGE:CXX>:-Wno-register> -Wno-misleading-indentation $<$<COMPILE_LANGUAGE:CXX>:-Wno-write-strings> -Wno-deprecated-declarations)
 
