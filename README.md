@@ -174,6 +174,10 @@ distribution packages.
 
 ## Environment variables
 
+* `MOTIFQT_DESKTOP_FONT=1` makes `XtDefaultFont` (the font of Athena and
+  plain Xt programs that set none) the desktop's font instead of X's
+  `fixed`. Xt's default colours (`XtDefaultBackground`,
+  `XtDefaultForeground`) always follow the desktop's palette.
 * `QT_QPA_PLATFORM=offscreen` runs without a display, which is useful for tests.
 * `MOTIFQT_AUTOQUIT=<ms>` exits the program after that many milliseconds.
 * `MOTIFQT_SCREENSHOT=<file.png>` saves the top-level windows just before
@@ -182,7 +186,8 @@ distribution packages.
   at the autoquit exit.
 * `MOTIFQT_SCRIPT="wait 500; key n; click quit"` drives a program
   headlessly. The steps are `wait <ms>`, `key [<widget>] <keys>`,
-  `click <widget> [button]`, `type <widget> <text>`, `shot <file.png>`,
+  `click <widget> [button]`, `type <widget> <text>`, `preedit` and
+  `commit <widget> <text>` (input method text), `shot <file.png>`,
   `dump` and `quit`, where `<widget>` is a Motif widget name.
 
 ## Running on X11

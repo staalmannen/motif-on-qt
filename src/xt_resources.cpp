@@ -9,6 +9,9 @@
 #include <QFile>
 #include <QDir>
 #include <QColor>
+#include <QFontDatabase>
+#include <QFontInfo>
+#include <QApplication>
 #include <QRegularExpression>
 #include <type_traits>
 #include <cstring>
@@ -423,6 +426,23 @@ static bool program_convert_string (Widget w, const ResDef *d, const char *str, 
   return true;
 }
 
+/* XtDefaultFont: X's "fixed", or the desktop's font with
+ * MOTIFQT_DESKTOP_FONT=1 (as an XLFD naming its family, weight, slant and
+ * pixel size) */
+QByteArray mq_default_font_name ()
+{
+  static QByteArray name;
+  if (!name.isEmpty ()) return name;
+  const char *env = getenv ("MOTIFQT_DESKTOP_FONT");
+  if (!env || !*env || !strcmp (env, "0")) return name = "fixed";
+  QFont f = QFontDatabase::systemFont (QFontDatabase::GeneralFont);
+  int px = QFontInfo (f).pixelSize ();
+  name = QStringLiteral ("-*-%1-%2-%3-normal--%4-*-*-*-*-*-*-*")
+           .arg (f.family (), f.bold () ? "bold" : "medium", f.italic () ? "i" : "r")
+           .arg (px > 0 ? px : 12).toLatin1 ();
+  return name;
+}
+
 bool mq_convert (Widget w, const ResDef *d, const char *str, XtArgVal *out)
 {
   if (program_convert_string (w, d, str, out)) return true;
@@ -444,6 +464,11 @@ bool mq_convert (Widget w, const ResDef *d, const char *str, XtArgVal *out)
     return true;
   }
   if (!strcmp (t, XmRPixel)) {
+    /* Xt's default colours are the desktop's (Qt's palette), so programs
+     * that use them follow a dark theme too */
+    QByteArray name = s.trimmed ();
+    if (!qstricmp (name.constData (), XtDefaultBackground)) { *out = (XtArgVal) mq_pixel (QApplication::palette ().color (QPalette::Window)); return true; }
+    if (!qstricmp (name.constData (), XtDefaultForeground)) { *out = (XtArgVal) mq_pixel (QApplication::palette ().color (QPalette::WindowText)); return true; }
     XColor c;
     if (XParseColor (mq_display, 0, s.trimmed ().constData (), &c)) {
       *out = (XtArgVal) mq_pixel (QColor (c.red >> 8, c.green >> 8, c.blue >> 8));
@@ -459,7 +484,8 @@ bool mq_convert (Widget w, const ResDef *d, const char *str, XtArgVal *out)
   /* Xlib fonts (Athena, program resources): XtDefaultFont is the default font */
   if (!strcmp (t, XtRFontStruct) || !strcmp (t, XtRFont) || !strcmp (t, XtRFontSet)) {
     QByteArray name = s.trimmed ();
-    if (name.isEmpty () || !qstricmp (name.constData (), XtDefaultFont) || !qstricmp (name.constData (), XtDefaultFontSet)) name = "fixed";
+    if (name.isEmpty () || !qstricmp (name.constData (), XtDefaultFont) || !qstricmp (name.constData (), XtDefaultFontSet))
+      name = mq_default_font_name ();
     if (!strcmp (t, XtRFont)) *out = (XtArgVal) XLoadFont (mq_display, name.constData ());
     else if (!strcmp (t, XtRFontStruct)) *out = (XtArgVal) XLoadQueryFont (mq_display, name.constData ());
     else {
