@@ -134,6 +134,18 @@ locale codeset if there is one, else valid UTF-8 sequences as UTF-8 and the
 other bytes as Latin-1 (programs join strings of both kinds). `mq_mb_encode` writes back UTF-8 under a
 UTF-8 locale and Latin-1 when the text fits, so Latin-1 round-trips.
 
+## HiDPI
+
+A window's backing image has its widget's device pixel ratio (QImage
+devicePixelRatio), so QPainter scales the X (logical) coordinates; the
+paint event copies the device pixels of the exposed area. XCopyArea copies
+at the source's resolution and lets QPainter convert; XGetImage and
+XCopyPlane read X pixels (scaled down). Pixmaps stay 1:1. X's thin lines
+are one X pixel wide (a 1-unit pen, not a cosmetic one) and strokes of odd
+width are shifted by half a pixel, so a line covers the pixels X says it
+does (programs erase lines by clearing those pixels). At ratio 1 every path
+is the one used before, and output is byte-identical.
+
 ## Events
 
 `XtAppMainLoop` runs the Qt event loop. An event filter per widget turns Qt

@@ -190,6 +190,17 @@ distribution packages.
   `commit <widget> <text>` (input method text), `shot <file.png>`,
   `dump` and `quit`, where `<widget>` is a Motif widget name.
 
+## HiDPI
+
+On a screen with a device pixel ratio above 1 (or with `QT_SCALE_FACTOR`),
+windows keep their backing images at the screen's resolution: what programs
+draw with Xlib - text, lines, NEdit's editor, DDD's data displays - is
+sharp, while programs still work in X pixels. Pixmaps stay 1:1 (programs
+read and write their pixels) and are scaled when drawn. DDD's data display
+at scale 2, before (left) and after:
+
+![](docs/screenshots/hidpi-ddd.png)
+
 ## Running on X11
 
 On an X11 desktop Qt itself (its xcb platform, and libGL) uses the system's

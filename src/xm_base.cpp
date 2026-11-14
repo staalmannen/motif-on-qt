@@ -297,7 +297,11 @@ protected:
       img = mq_window_image (win, true);
     }
     QPainter p (this);
-    if (img) p.drawImage (pe->rect (), *img, pe->rect ());
+    if (img) {
+      qreal d = img->devicePixelRatio ();
+      QRectF src (pe->rect ().x () * d, pe->rect ().y () * d, pe->rect ().width () * d, pe->rect ().height () * d);
+      p.drawImage (QRectF (pe->rect ()), *img, src);
+    }
     else p.fillRect (pe->rect (), palette ().color (QPalette::Window));
     paint_extra (p);
   }

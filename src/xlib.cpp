@@ -240,6 +240,43 @@ static QWidget *window_widget (Window win)
   return it->qw.data ();
 }
 
+/* HiDPI: a window's backing image has the widget's device pixel ratio, so
+ * what programs draw with Xlib is sharp; programs still see X pixels (the
+ * logical size). Pixmaps stay 1:1: programs read and write their pixels */
+static qreal window_dpr (QWidget *qw)
+{
+  qreal d = qw ? qw->devicePixelRatioF () : qApp->devicePixelRatio ();
+  return d > 0 ? d : 1;
+}
+
+static QImage new_window_image (QSize logical, qreal dpr, const QColor &bg)
+{
+  QImage img (dpr == 1 ? logical : (QSizeF (logical) * dpr).toSize (), QImage::Format_RGB32);
+  img.setDevicePixelRatio (dpr);
+  img.fill (bg);
+  return img;
+}
+
+/* a part of an image in logical (X) pixels, as a 1:1 image */
+static QImage logical_copy (const QImage &img, int x, int y, int w, int h)
+{
+  qreal d = img.devicePixelRatio ();
+  if (d == 1) return img.copy (x, y, w, h);
+  QImage part = img.copy (QRectF (x * d, y * d, w * d, h * d).toRect ());
+  part.setDevicePixelRatio (1);
+  return part.scaled (w, h, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+}
+
+/* a part of an image at its own resolution (drawn back, QPainter scales) */
+static QImage device_copy (const QImage &img, int x, int y, int w, int h)
+{
+  qreal d = img.devicePixelRatio ();
+  if (d == 1) return img.copy (x, y, w, h);
+  QImage part = img.copy (QRectF (x * d, y * d, w * d, h * d).toRect ());
+  part.setDevicePixelRatio (d);
+  return part;
+}
+
 QImage *mq_window_image (Window win, bool create)
 {
   auto it = drawables ().find (win);
@@ -251,10 +288,9 @@ QImage *mq_window_image (Window win, bool create)
   if (r.widget && mq_isset (r.widget, XmNwidth) && !qw->isVisible ())
     want = QSize (qMax (1, mq_geti (r.widget, XmNwidth)), qMax (1, mq_geti (r.widget, XmNheight)));
   if (r.image.isNull () && create) {
-    r.image = QImage (want, QImage::Format_RGB32);
     QColor bg = qw ? qw->palette ().color (QPalette::Window) : QColor (0xd9, 0xd9, 0xd9);
     if (r.widget && mq_isset (r.widget, XmNbackground)) bg = mq_color (mq_get (r.widget, XmNbackground));
-    r.image.fill (bg);
+    r.image = new_window_image (want, window_dpr (qw), bg);
   }
   return r.image.isNull () ? nullptr : &r.image;
 }
@@ -264,11 +300,10 @@ void mq_window_resize (Window win, int w, int h)
   auto it = drawables ().find (win);
   if (it == drawables ().end () || it->pixmap) return;
   QImage old = it->image;
-  QImage img (QSize (qMax (1, w), qMax (1, h)), QImage::Format_RGB32);
   QWidget *qw = window_widget (win);
   QColor bg = qw ? qw->palette ().color (QPalette::Window) : QColor (0xd9, 0xd9, 0xd9);
   if (it->widget && mq_isset (it->widget, XmNbackground)) bg = mq_color (mq_get (it->widget, XmNbackground));
-  img.fill (bg);
+  QImage img = new_window_image (QSize (qMax (1, w), qMax (1, h)), window_dpr (qw), bg);
   if (!old.isNull ()) { QPainter p (&img); p.drawImage (0, 0, old); }   /* NorthWest bit gravity */
   it->image = img;
 }
@@ -319,7 +354,8 @@ public:
   QPainter p;
   bool ok = false;
   Drawable d;
-  GcPainter (Drawable dr, GC gc, bool fill) : d (dr)
+  /* fill: shapes filled with the GC's fill; else lines, or text */
+  GcPainter (Drawable dr, GC gc, bool fill, bool text = false) : d (dr)
   {
     QImage *img = target (dr);
     if (!img || !gc) return;
@@ -339,7 +375,10 @@ public:
     }
     QPen pen (fg);
     pen.setWidth (gc->v.line_width);
-    pen.setCosmetic (gc->v.line_width == 0);
+    /* X's thin lines (width 0) are one pixel wide: one device pixel at 1:1,
+     * one X pixel (several device pixels) on HiDPI */
+    if (gc->v.line_width == 0 && img->devicePixelRatio () != 1) pen.setWidth (1);
+    else pen.setCosmetic (gc->v.line_width == 0);
     pen.setCapStyle (gc->v.cap_style == CapRound ? Qt::RoundCap : gc->v.cap_style == CapProjecting ? Qt::SquareCap : Qt::FlatCap);
     pen.setJoinStyle (gc->v.join_style == JoinRound ? Qt::RoundJoin : gc->v.join_style == JoinBevel ? Qt::BevelJoin : Qt::MiterJoin);
     if (gc->v.line_style != LineSolid) {
@@ -369,6 +408,10 @@ public:
         p.setClipRegion (QRegion (bm).translated (gc->v.clip_x_origin, gc->v.clip_y_origin));
       }
     }
+    /* HiDPI: a line of odd width (thin lines are 1) covers the pixels from
+     * x to x + 1 in X, not x - 1/2 to x + 1/2 (Qt) - otherwise a program
+     * that erases it by clearing its pixels leaves a sliver */
+    if (!fill && !text && img->devicePixelRatio () != 1 && (qMax (1, (int) gc->v.line_width) % 2)) p.translate (0.5, 0.5);
   }
   ~GcPainter ()
   {
@@ -382,7 +425,7 @@ public:
 void mq_draw_text_lines (Drawable d, GC gc, const QFont &f, int x, int y, int width, int align,
                          const QStringList &lines, bool image, int ul_line, int ul_from, int ul_len)
 {
-  GcPainter g (d, gc, false);
+  GcPainter g (d, gc, false, true);
   if (!g.ok) return;
   g.p.setFont (f);
   QFontMetrics fm (f);
@@ -839,8 +882,9 @@ int XClearArea (Display * a0_, Window w, int x, int y, unsigned int width, unsig
   QImage *img = mq_window_image (w, true);
   if (!img) return 0;
   QWidget *qw = window_widget (w);
-  if (!width) width = img->width () - x;
-  if (!height) height = img->height () - y;
+  QSize logical = img->deviceIndependentSize ().toSize ();
+  if (!width) width = logical.width () - x;
+  if (!height) height = logical.height () - y;
   QColor bg = qw ? qw->palette ().color (QPalette::Window) : QColor (0xd9, 0xd9, 0xd9);
   Widget wd = mq_widget_for_window (w);
   if (wd && mq_isset (wd, XmNbackground)) bg = mq_color (mq_get (wd, XmNbackground));
@@ -1428,7 +1472,7 @@ int XFillPolygon (Display * a0_, Drawable d, GC gc, XPoint *pts, int n, int a5_,
 
 static void draw_text (Drawable d, GC gc, int x, int y, const QString &text, bool image)
 {
-  GcPainter g (d, gc, false);
+  GcPainter g (d, gc, false, true);
   if (!g.ok) return;
   QFont f = mq_font_for (gc->v.font);
   g.p.setFont (f);
@@ -1488,7 +1532,7 @@ int XCopyArea (Display * a0_, Drawable src, Drawable dst, GC gc, int sx, int sy,
 { MQ_FWD (XCopyArea, a0_, a0_, src, dst, gc, sx, sy, w, h, dx, dy);
   QImage *s = target (src);
   if (!s) return 0;
-  QImage piece = s->copy (sx, sy, w, h);
+  QImage piece = device_copy (*s, sx, sy, w, h);   /* QPainter converts between pixel ratios */
   GcPainter g (dst, gc, true);
   if (g.ok) g.p.drawImage (dx, dy, piece);
   return 1;
@@ -1498,7 +1542,7 @@ int XCopyPlane (Display * a0_, Drawable src, Drawable dst, GC gc, int sx, int sy
 { MQ_FWD (XCopyPlane, a0_, a0_, src, dst, gc, sx, sy, w, h, dx, dy, a10_);
   QImage *s = target (src);
   if (!s) return 0;
-  QImage piece = s->copy (sx, sy, w, h);
+  QImage piece = logical_copy (*s, sx, sy, w, h);
   QImage out (piece.size (), QImage::Format_ARGB32);
   QColor fg = mq_color (gc->v.foreground), bg = mq_color (gc->v.background);
   for (int y = 0; y < piece.height (); y++)
@@ -1704,7 +1748,7 @@ XImage *XGetImage (Display * a0_, Drawable d, int x, int y, unsigned int w, unsi
 { MQ_FWD (XGetImage, a0_, a0_, d, x, y, w, h, a6_, a7_);
   QImage *s = target (d);
   if (!s) return nullptr;
-  QImage part = s->copy (x, y, w, h).convertToFormat (QImage::Format_RGB32);
+  QImage part = logical_copy (*s, x, y, w, h).convertToFormat (QImage::Format_RGB32);
   char *data = (char *) malloc (w * h * 4);
   for (unsigned r = 0; r < h; r++) memcpy (data + r * w * 4, part.constScanLine (r), w * 4);
   return make_ximage (w, h, data);
