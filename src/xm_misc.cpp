@@ -42,10 +42,8 @@ void mq_builtin_action (Widget w, const QByteArray &name, XEvent *xe, String *pa
     QString s;
     if (name == "insert-string") for (Cardinal i = 0; i < *n; i++) s += mq_mb_decode (params[i]);
     else if (xe && (xe->type == KeyPress)) {
-      char buf[16];
-      KeySym ks;
-      int len = XLookupString (&xe->xkey, buf, sizeof buf, &ks, nullptr);
-      s = mq_mb_decode (buf, len);
+      char32_t c = mq_keysym_text (xe->xkey.keycode, xe->xkey.state);
+      if (c >= 0x20 && c != 0x7f) s = QString::fromUcs4 (&c, 1);
     }
     if (!s.isEmpty ()) {
       QByteArray b = mq_mb_encode (s);

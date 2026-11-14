@@ -103,12 +103,55 @@ static void check_parse_command (void)
   XrmDestroyDatabase (db);
 }
 
+/* what keys type: Latin-1, legacy keysyms (the euro sign, Cyrillic),
+ * Unicode keysyms, the keypad, Control; their names */
+static void check_keys (Display *d)
+{
+  XKeyEvent e;
+  memset (&e, 0, sizeof e);
+  e.type = KeyPress;
+  e.display = d;
+  char buf[16];
+  KeySym k;
+  e.keycode = XK_eacute;
+  CHECK (XLookupString (&e, buf, sizeof buf, &k, NULL) == 1 && (unsigned char) buf[0] == 0xe9 && k == XK_eacute);
+  e.keycode = XK_EuroSign;   /* a legacy keysym: the C locale has no euro, so UTF-8 */
+  CHECK (XLookupString (&e, buf, sizeof buf, &k, NULL) == 3 && memcmp (buf, "\xe2\x82\xac", 3) == 0);
+  e.keycode = 0x01000000 | 0x1F600;   /* an emoji, as a Unicode keysym */
+  CHECK (XLookupString (&e, buf, sizeof buf, &k, NULL) == 4 && memcmp (buf, "\xf0\x9f\x98\x80", 4) == 0);
+  e.keycode = XK_KP_5;
+  CHECK (XLookupString (&e, buf, sizeof buf, &k, NULL) == 1 && buf[0] == '5');
+  e.keycode = 'a';
+  e.state = ControlMask;
+  CHECK (XLookupString (&e, buf, sizeof buf, &k, NULL) == 1 && buf[0] == 1);
+  e.state = 0;
+  e.keycode = XK_F1;
+  CHECK (XLookupString (&e, buf, sizeof buf, &k, NULL) == 0 && k == XK_F1);
+
+  /* UTF-8 whatever the locale; too small a buffer says so */
+  Status st;
+  e.keycode = XK_Cyrillic_a;
+  CHECK (Xutf8LookupString (NULL, &e, buf, sizeof buf, &k, &st) == 2 && memcmp (buf, "\xd0\xb0", 2) == 0 && st == XLookupBoth);
+  CHECK (Xutf8LookupString (NULL, &e, buf, 1, &k, &st) == 2 && st == XBufferOverflow);
+  wchar_t wbuf[4];
+  CHECK (XwcLookupString (NULL, &e, wbuf, 4, &k, &st) == 1 && wbuf[0] == 0x430);
+
+  CHECK (strcmp (XKeysymToString (0x010020ac), "U20AC") == 0);
+  CHECK (XStringToKeysym ("U20AC") == 0x010020ac);
+  KeySym lo, up;
+  XConvertCase (0x01000000 | 0x0416, &lo, &up);   /* Cyrillic capital zhe */
+  CHECK (lo == (0x01000000 | 0x0436) && up == (0x01000000 | 0x0416));
+  XConvertCase (XK_Eacute, &lo, &up);
+  CHECK (lo == XK_eacute && up == XK_Eacute);
+}
+
 int main (int argc, char **argv)
 {
   check_parse_command ();
   XtSetTypeConverter (XmRString, XmRXmString, cvt_xmstring, NULL, 0, XtCacheNone, NULL);
   top = XtVaAppInitialize (&app, "Athena", NULL, 0, &argc, argv, NULL, NULL);
   CHECK (XtIsTopLevelShell (top) && XtIsWMShell (top));
+  check_keys (XtDisplay (top));
 
   /* Athena */
   Widget paned = XtCreateManagedWidget ("paned", panedWidgetClass, top, NULL, 0);

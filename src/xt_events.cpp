@@ -48,8 +48,10 @@ static KeySym qt_keysym (QKeyEvent *ke)
   if (ke->key () >= Qt::Key_F1 && ke->key () <= Qt::Key_F35) return XK_F1 + (ke->key () - Qt::Key_F1);
   QString t = ke->text ();
   if (!t.isEmpty () && t[0].unicode () >= 0x20 && !(ke->modifiers () & Qt::ControlModifier)) {
-    uint c = t[0].unicode ();
-    return c < 0x100 ? c : 0x01000000 | c;
+    /* the first character (emoji are surrogate pairs in a QString) */
+    QList<uint> ucs = t.toUcs4 ();
+    uint c = ucs.isEmpty () ? 0 : ucs[0];
+    if (c >= 0x20 && c != 0x7f) return c < 0x100 ? c : 0x01000000 | c;
   }
   int k = ke->key ();
   if (k >= Qt::Key_A && k <= Qt::Key_Z) return (ke->modifiers () & Qt::ShiftModifier) ? k : k + 0x20;
