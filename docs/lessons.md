@@ -102,6 +102,11 @@ Things that cost time once; check here before debugging something similar.
   text); decode sequence by sequence, not all or nothing.
 - Xm.h's `FMT8BIT` macro clashes with Xaw's Text.h, as with the real
   libraries.
+- XmTextInsert at the cursor moves the cursor past the new text; text
+  before the cursor shifts it, text after leaves it. DDD's console reads its
+  prompt position back from the cursor after each insert (output came out
+  of order and commands were sent with the prompt). In modifyVerify,
+  newInsert starts as the cursor, and callbacks may move startPos/endPos.
 - A destroyed widget's Qt object goes with deleteLater, its record at once:
   detach the event bridge and drop the window id, or events posted in
   between read freed memory (glibc survived it, musl crashed; valgrind

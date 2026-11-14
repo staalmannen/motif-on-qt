@@ -82,6 +82,25 @@ static void text_set_raw (Widget w, const QString &s)
   x->busy = false;
 }
 
+/* replace [from, to) by s in place (scroll position and the rest of the
+ * document stay); no callbacks */
+static void text_splice (Widget w, int from, int to, const QString &s)
+{
+  TextExt *x = mq_ext<TextExt> (w);
+  x->busy = true;
+  if (auto *l = mq_q<QLineEdit> (w)) {
+    QString t = l->text ();
+    l->setText (t.left (from) + s + t.mid (to));
+  } else if (auto *t = mq_q<QPlainTextEdit> (w)) {
+    QTextCursor c (t->document ());
+    c.setPosition (from);
+    c.setPosition (to, QTextCursor::KeepAnchor);
+    c.insertText (s);
+  }
+  x->shadow = text_get (w);
+  x->busy = false;
+}
+
 static int text_cursor (Widget w)
 {
   if (auto *l = mq_q<QLineEdit> (w)) return l->cursorPosition ();
@@ -110,8 +129,14 @@ static void value_changed (Widget w)
 /* event: the user's key or button event; null for changes the program
  * makes (XmTextSetString, XmTextReplace ...), as in Motif - programs veto
  * only the user's edits by testing it (DDD's read-only source window) */
-static bool verify (Widget w, int start, int end, QString *text, XEvent *event)
+struct VerifyResult {
+  int start, end;     /* where the change goes (a callback may move it) */
+  int new_insert;     /* the cursor afterwards if a callback set it, else -1 */
+};
+
+static bool verify (Widget w, int start, int end, QString *text, XEvent *event, VerifyResult *res = nullptr)
 {
+  if (res) *res = { start, end, -1 };
   if (!mq_has_callbacks (w, XmNmodifyVerifyCallback)) return true;
   QByteArray b = local (*text);
   XmTextBlockRec block;
@@ -123,17 +148,36 @@ static bool verify (Widget w, int start, int end, QString *text, XEvent *event)
   cs.reason = XmCR_MODIFYING_TEXT_VALUE;
   cs.event = event;
   cs.doit = True;
-  cs.currInsert = text_cursor (w);
-  cs.newInsert = start + text->size ();
+  /* as Motif: newInsert starts as the cursor; a callback may set it */
+  cs.currInsert = cs.newInsert = text_cursor (w);
   cs.startPos = start;
   cs.endPos = end;
   cs.text = &block;
   mq_call (w, XmNmodifyVerifyCallback, &cs);
   bool ok = cs.doit;
   if (ok) *text = cs.text->ptr ? mq_mb_decode (cs.text->ptr, cs.text->length) : QString ();
+  if (ok && res) {
+    int len = text_get (w).size ();
+    res->start = qBound (0, (int) cs.startPos, len);
+    res->end = qBound (res->start, (int) cs.endPos, len);
+    if (cs.newInsert != cs.currInsert) res->new_insert = (int) cs.newInsert;
+  }
   XtFree (block.ptr == cs.text->ptr ? block.ptr : cs.text->ptr);
   if (block.ptr != cs.text->ptr) XtFree (block.ptr);
   return ok;
+}
+
+/* Motif's cursor after replacing [from, to) by n characters: an insertion
+ * at the cursor moves it past the new text (DDD reads its prompt position
+ * back this way); text before the cursor shifts it; text after leaves it */
+static int cursor_after (int cursor, int from, int to, int n)
+{
+  if (from == to && cursor == from) return from + n;
+  if (from < cursor) {
+    if (cursor < to) return cursor - from <= n ? cursor : from + n;
+    return cursor - (to - from) + n;
+  }
+  return cursor;
 }
 
 /* the user changed the text: verify after the fact, revert or adjust */
@@ -148,22 +192,28 @@ static void text_changed (Widget w)
   int suf = 0;
   while (suf < now.size () - pre && suf < old.size () - pre && now[now.size () - 1 - suf] == old[old.size () - 1 - suf]) suf++;
   QString inserted = now.mid (pre, now.size () - pre - suf);
+  if (!mq_has_callbacks (w, XmNmodifyVerifyCallback)) {
+    x->shadow = now;
+    value_changed (w);
+    return;
+  }
+  /* the callbacks see the text as it was, with the cursor where the edit
+   * started (after the deleted text for a backspace) */
   QString want = inserted;
-  int cursor = text_cursor (w);
-  if (!verify (w, pre, old.size () - suf, &want, mq_current_event ())) {
+  int end = old.size () - suf, cursor_now = text_cursor (w);
+  text_splice (w, pre, pre + inserted.size (), old.mid (pre, end - pre));
+  text_set_cursor (w, inserted.isEmpty () ? end : pre);
+  VerifyResult r;
+  if (!verify (w, pre, end, &want, mq_current_event (), &r)) {
     QApplication::beep ();
-    text_set_raw (w, old);
     text_set_cursor (w, pre);
     return;
   }
-  if (want != inserted) {
-    QString fixed = old.left (pre) + want + old.mid (old.size () - suf);
-    text_set_raw (w, fixed);
-    text_set_cursor (w, pre + want.size ());
-  } else {
-    x->shadow = now;
-    Q_UNUSED (cursor);
-  }
+  /* a callback may rewrite the text or move the change (DDD sends typing
+   * before its prompt to the end of the line) */
+  text_splice (w, r.start, r.end, want);
+  bool moved = want != inserted || r.start != pre || r.end != end;
+  text_set_cursor (w, r.new_insert >= 0 ? r.new_insert : moved ? r.start + want.size () : cursor_now);
   value_changed (w);
 }
 
@@ -174,13 +224,18 @@ static void text_replace (Widget w, int from, int to, const QString &s, bool not
   from = qBound (0, from, (int) old.size ());
   to = qBound (from, to, (int) old.size ());
   QString ins = s;
-  if (notify && !verify (w, from, to, &ins, nullptr)) return;
+  VerifyResult r { from, to, -1 };
+  if (notify && !verify (w, from, to, &ins, nullptr, &r)) return;
+  from = r.start;
+  to = r.end;
   int max = mq_geti (w, XmNmaxLength);
   QString now = old.left (from) + ins + old.mid (to);
   if (max > 0 && now.size () > max) now.truncate (max);
   int cursor = text_cursor (w);
   text_set_raw (w, now);
-  text_set_cursor (w, cursor <= from ? cursor : cursor + ins.size () - (to - from));
+  int after = cursor_after (cursor, from, to, ins.size ());
+  if (r.new_insert >= 0 && from == to && cursor == from) after = r.new_insert;
+  text_set_cursor (w, qMin (after, (int) now.size ()));
   if (notify) value_changed (w);
 }
 

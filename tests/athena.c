@@ -153,6 +153,22 @@ int main (int argc, char **argv)
   XmTextReplace (mtext, 0, 1, " ");
   CHECK (vetoed == 0 && XmTextGetLastPosition (mtext) == 36);
 
+  /* the cursor as Motif moves it (DDD's console reads its prompt position
+   * back from it): an insertion at the cursor moves it past the new text,
+   * text before it shifts it, text after it leaves it */
+  XmTextSetString (mtext, "(gdb) ");
+  XmTextSetInsertionPosition (mtext, 6);
+  XmTextInsert (mtext, 6, "out\n");
+  CHECK (XmTextGetInsertionPosition (mtext) == 10);
+  XmTextInsert (mtext, 0, "ab");
+  CHECK (XmTextGetInsertionPosition (mtext) == 12);
+  XmTextInsert (mtext, 12, "");
+  XmTextReplace (mtext, 12, 12, "end");
+  CHECK (XmTextGetInsertionPosition (mtext) == 15);
+  XmTextSetInsertionPosition (mtext, 3);
+  XmTextInsert (mtext, 5, "xy");
+  CHECK (XmTextGetInsertionPosition (mtext) == 3);
+
   /* Latin-1 bytes (DDD's sources, gdb in the C locale) come back unchanged */
   XmTextSetString (mtext, "Copyright \251 L\374tkehaus");
   char *back = XmTextGetString (mtext);
