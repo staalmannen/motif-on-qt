@@ -832,6 +832,10 @@ static void free_rec (Widget w)
 {
   for (Widget c : QList<Widget> (R (w)->children)) free_rec (c);
   for (Widget p : QList<Widget> (R (w)->popups)) free_rec (p);
+  /* the Qt object goes later (deleteLater): events posted before then
+   * must not reach this record */
+  if (R (w)->bridge) R (w)->bridge->widget = nullptr;
+  if (R (w)->window) XDestroyWindow (mq_display, R (w)->window);   /* the window id names this record */
   if (R (w)->obj) {
     R (w)->obj->setProperty ("_mq_widget", QVariant ());
     if (QWidget *qw = mq_qw (w)) qw->hide ();
