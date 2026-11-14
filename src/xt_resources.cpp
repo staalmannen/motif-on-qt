@@ -239,7 +239,7 @@ QString mq_gets (Widget w, const char *name)
   XtArgVal v = mq_get (w, name);
   if (!d || !v) return QString ();
   if (category (d) == C_XMSTRING) return mq_xmstring_text ((XmString) v);
-  if (category (d) == C_STRING) return QString::fromLocal8Bit ((const char *) v);
+  if (category (d) == C_STRING) return mq_mb_decode ((const char *) v);
   return QString ();
 }
 
@@ -299,14 +299,139 @@ static QStringList split_table (const QString &s)
   return out;
 }
 
+/* ---------------------------------------------------------------- type converters
+ * Converters a program registers (XtSetTypeConverter, XtAddConverter) take
+ * precedence over ours, as in Xt: DDD's String to XmString converter reads
+ * its "@rm"/"@bf" font changes, its pixmap converter searches its own paths. */
+namespace {
+struct ConverterRec {
+  XtTypeConverter conv = nullptr;   /* new style */
+  XtConverter old = nullptr;        /* Xt 1 style */
+  QVector<XtConvertArgRec> args;
+};
+QHash<QPair<QByteArray, QByteArray>, ConverterRec> &converters ()
+{
+  static auto *h = new QHash<QPair<QByteArray, QByteArray>, ConverterRec>;
+  return *h;
+}
+QByteArray type_key (const char *t) { return QByteArray (t && !strcmp (t, XmRString) ? XtRString : t ? t : ""); }
+
+/* the extra arguments a converter asked for, computed for widget w */
+QVector<XrmValue> convert_args (Widget w, const QVector<XtConvertArgRec> &spec, QList<QByteArray> &storage)
+{
+  QVector<XrmValue> out;
+  for (const XtConvertArgRec &a : spec) {
+    XrmValue v { a.size, nullptr };
+    switch (a.address_mode) {
+    case XtAddress: v.addr = (XPointer) a.address_id; break;
+    case XtImmediate: v.addr = (XPointer) &a.address_id; break;
+    case XtBaseOffset:
+    case XtWidgetBaseOffset: {
+      Widget base = w;
+      if (a.address_mode == XtWidgetBaseOffset) while (base && !(R (base)->klass->kind & K_WIDGET)) base = R (base)->parent;
+      if (!base) {
+        /* no widget (application resources): a core record with the defaults */
+        static WidgetRec fake;
+        fake.core.screen = mq_screen_ptr;
+        fake.core.colormap = DefaultColormapOfScreen (mq_screen_ptr);
+        fake.core.depth = DefaultDepthOfScreen (mq_screen_ptr);
+        base = &fake;
+      }
+      v.addr = base ? (XPointer) ((char *) base + (long) a.address_id) : nullptr;
+      break;
+    }
+    case XtResourceString:
+    case XtResourceQuark: {
+      const char *name = a.address_mode == XtResourceString ? (const char *) a.address_id
+                                                           : XrmQuarkToString ((XrmQuark) (long) a.address_id);
+      QByteArray buf (qMax<int> (a.size, sizeof (XtArgVal)), 0);
+      if (w && name) XtVaGetValues (w, name, buf.data (), NULL);
+      storage << buf;
+      v.addr = (XPointer) storage.last ().data ();
+      break;
+    }
+    case XtProcedureArg:
+      if (a.address_id) ((XtConvertArgProc) a.address_id) (w, &v.size, &v);
+      break;
+    default: break;
+    }
+    if (!v.addr && a.address_mode != XtProcedureArg) {
+      static XtArgVal zero = 0;
+      v.addr = (XPointer) &zero;
+    }
+    out << v;
+  }
+  return out;
+}
+
+/* runs a registered converter; to->addr null asks for its own storage */
+bool run_converter (const ConverterRec &c, Widget w, XrmValue *from, XrmValue *to)
+{
+  QList<QByteArray> storage;
+  QVector<XrmValue> args = convert_args (w, c.args, storage);
+  Cardinal n = args.size ();
+  Display *d = mq_display;
+  if (c.conv) {
+    XtPointer closure = nullptr;
+    return c.conv (d, args.data (), &n, from, to, &closure);
+  }
+  /* an old style converter always answers in its own storage */
+  XrmValue result { 0, nullptr };
+  c.old (args.data (), &n, from, &result);
+  if (!result.addr) return false;
+  if (!to->addr) { *to = result; return true; }
+  if (to->size < result.size) { to->size = result.size; return false; }
+  memcpy (to->addr, result.addr, result.size);
+  to->size = result.size;
+  return true;
+}
+}
+
+void mq_add_converter (const char *from, const char *to, XtTypeConverter conv, XtConverter old, XtConvertArgList args, Cardinal n)
+{
+  ConverterRec c;
+  c.conv = conv;
+  c.old = old;
+  for (Cardinal i = 0; i < n; i++) c.args << args[i];
+  converters ().insert ({ type_key (from), type_key (to) }, c);
+}
+
+/* a program's converter for from -> to; to as XtConvertAndStore takes it */
+bool mq_program_convert (Widget w, const char *from_type, XrmValue *from, const char *to_type, XrmValue *to)
+{
+  auto it = converters ().constFind ({ type_key (from_type), type_key (to_type) });
+  if (it == converters ().constEnd ()) return false;
+  return run_converter (it.value (), w, from, to);
+}
+
+static bool program_convert_string (Widget w, const ResDef *d, const char *str, XtArgVal *out)
+{
+  if (converters ().isEmpty ()) return false;
+  unsigned size = d->size ? d->size : sizeof (XtArgVal);
+  if (size > sizeof (XtArgVal)) return false;
+  union { XtArgVal v; long l; int i; short s; char c; char bytes[sizeof (XtArgVal)]; } buf;
+  memset (&buf, 0, sizeof buf);
+  XrmValue from { (unsigned) strlen (str) + 1, (XPointer) str };
+  XrmValue to { size, (XPointer) buf.bytes };
+  if (!mq_program_convert (w, XtRString, &from, d->rtype, &to)) return false;
+  switch (size) {
+  case sizeof (char): *out = (unsigned char) buf.c; break;
+  case sizeof (short): *out = (unsigned short) buf.s; break;
+  case sizeof (int): *out = (unsigned int) buf.i; break;
+  default: *out = buf.v; break;
+  }
+  return true;
+}
+
 bool mq_convert (Widget w, const ResDef *d, const char *str, XtArgVal *out)
 {
+  if (program_convert_string (w, d, str, out)) return true;
   const char *t = d->rtype;
   QByteArray s = QByteArray (str);
-  if (!strcmp (t, XmRXmString)) { *out = (XtArgVal) mq_xmstring_from (QString::fromLocal8Bit (s)); return true; }
+  if (!strcmp (t, XmRXmString)) { *out = (XtArgVal) mq_xmstring_from (mq_mb_decode (s.constData ())); return true; }
   if (!strcmp (t, XmRString)) { *out = (XtArgVal) XtNewString (s.constData ()); return true; }
   if (!strcmp (t, XmRXmStringTable)) {
-    QStringList parts = split_table (QString::fromLocal8Bit (s));
+    QStringList parts = split_table (mq_mb_decode (s.constData ()));
     auto *table = (XmString *) XtMalloc (sizeof (XmString) * (parts.size () + 1));
     for (int i = 0; i < parts.size (); i++) table[i] = mq_xmstring_from (parts[i]);
     table[parts.size ()] = nullptr;
@@ -327,9 +452,23 @@ bool mq_convert (Widget w, const ResDef *d, const char *str, XtArgVal *out)
     return false;
   }
   if (!strcmp (t, XmRFontList) || !strcmp (t, XmRRenderTable) || !strcmp (t, "ButtonRenderTable") ||
-      !strcmp (t, "LabelRenderTable") || !strcmp (t, "TextRenderTable") || !strcmp (t, XmRFontStruct)) {
+      !strcmp (t, "LabelRenderTable") || !strcmp (t, "TextRenderTable")) {
     *out = (XtArgVal) mq_fontlist_from_string (s.constData ());
     return true;
+  }
+  /* Xlib fonts (Athena, program resources): XtDefaultFont is the default font */
+  if (!strcmp (t, XtRFontStruct) || !strcmp (t, XtRFont) || !strcmp (t, XtRFontSet)) {
+    QByteArray name = s.trimmed ();
+    if (name.isEmpty () || !qstricmp (name.constData (), XtDefaultFont) || !qstricmp (name.constData (), XtDefaultFontSet)) name = "fixed";
+    if (!strcmp (t, XtRFont)) *out = (XtArgVal) XLoadFont (mq_display, name.constData ());
+    else if (!strcmp (t, XtRFontStruct)) *out = (XtArgVal) XLoadQueryFont (mq_display, name.constData ());
+    else {
+      char **missing;
+      int nmissing;
+      char *def;
+      *out = (XtArgVal) XCreateFontSet (mq_display, name.constData (), &missing, &nmissing, &def);
+    }
+    return *out != 0;
   }
   if (!strcmp (t, XmRWidget) || !strcmp (t, XmRWindow)) {
     Widget ref = w && R (w)->parent ? XtNameToWidget (R (w)->parent, s.trimmed ().constData ()) : nullptr;
@@ -781,6 +920,21 @@ Bool XrmGetResource (XrmDatabase db, _Xconst char *str_name, _Xconst char *str_c
   if (str_type) *str_type = (char *) "String";
   if (value) { value->addr = (XPointer) v->constData (); value->size = v->size () + 1; }
   return True;
+}
+
+/* the quark form: names and classes as NULLQUARK-terminated lists */
+Bool XrmQGetResource (XrmDatabase db, XrmNameList names, XrmClassList classes, XrmRepresentation *type, XrmValue *value)
+{
+  QByteArray n, c;
+  for (int i = 0; names && names[i] != NULLQUARK; i++) {
+    if (i) { n += '.'; c += '.'; }
+    n += XrmQuarkToString (names[i]);
+    c += classes && classes[i] != NULLQUARK ? XrmQuarkToString (classes[i]) : XrmQuarkToString (names[i]);
+  }
+  char *t = nullptr;
+  Bool ok = XrmGetResource (db, n.constData (), c.constData (), &t, value);
+  if (type) *type = ok ? XrmStringToQuark ("String") : NULLQUARK;
+  return ok;
 }
 
 void XrmMergeDatabases (XrmDatabase source, XrmDatabase *target)

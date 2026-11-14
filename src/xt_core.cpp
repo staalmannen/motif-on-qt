@@ -73,9 +73,15 @@ static bool display_available ()
 #endif
 }
 
+static QHash<WidgetClass, MqClass *> &class_registry ();
+
 void mq_ensure_app (int *argc, char **argv)
 {
-  if (!mq_app) mq_app = new _XtAppStruct;
+  if (!mq_app) {
+    mq_app = new _XtAppStruct;
+    /* the class records are complete now (static constructors ran) */
+    for (WidgetClass c : class_registry ().keys ()) mq_motif_class_extension (c);
+  }
   if (!QCoreApplication::instance () && !display_available ()) return;   /* an app context needs no display */
   if (!QCoreApplication::instance ()) {
     static int static_argc = 1;
@@ -162,6 +168,7 @@ MqClass *mq_foreign_class (WidgetClass c);   /* xt_foreign.cpp */
 void mq_foreign_initialize (Widget w, ArgList args, Cardinal n);
 bool mq_foreign_store (Widget w, const char *name, XtArgVal v);
 bool mq_foreign_fetch (Widget w, const char *name, XtArgVal dest);
+void mq_foreign_get_values_hook (Widget w, ArgList args, Cardinal n);
 void mq_foreign_callbacks_changed (Widget w, const char *name);
 void *mq_foreign_set_values_begin (Widget w);
 void mq_foreign_set_values_end (Widget w, void *snap, ArgList args, Cardinal n);
@@ -250,6 +257,11 @@ void mq_register_class (MqClass *c, Cardinal widget_size)
   /* at least Motif's own record: programs read it and subclass it */
   cc.widget_size = qMax<Cardinal> (widget_size, mq_motif_record_size (c->class_name));
   cc.class_inited = class_flags (c->kind);
+  /* XtIsWMShell / XtIsTopLevelShell test these bits */
+  for (MqClass *k = c; k; k = k->superclass) {
+    if (!strcmp (k->class_name, "WMShell")) cc.class_inited |= 0x40;
+    if (!strcmp (k->class_name, "TopLevelShell")) cc.class_inited |= 0x80;
+  }
   cc.version = XtVersion;
   cc.compress_motion = True;
   cc.compress_exposure = XtExposeCompressMaximal;
@@ -966,6 +978,7 @@ void XtManageChild (Widget w)
 {
   if (!w || R (w)->managed || R (w)->destroying) return;
   R (w)->managed = true;
+  if (R (w)->klass->kind & (K_WIDGET | K_GADGET)) w->core.managed = True;   /* parents' layouts read it */
   Widget p = R (w)->parent;
   if (p && !R (w)->is_popup) {
     for (MqClass *k = R (p)->klass; k; k = k->superclass)
@@ -981,6 +994,7 @@ void XtUnmanageChild (Widget w)
 {
   if (!w || !R (w)->managed) return;
   R (w)->managed = false;
+  if (R (w)->klass->kind & (K_WIDGET | K_GADGET)) w->core.managed = False;
   Widget p = R (w)->parent;
   if (p && !R (w)->is_popup)
     for (MqClass *k = R (p)->klass; k; k = k->superclass)
@@ -1257,6 +1271,7 @@ void XtGetValues (Widget w, ArgList args, Cardinal n)
     if (!strcmp (d->rtype, XmRXmString) && v && !handled) v = (XtArgVal) XmStringCopy ((XmString) v);
     write_out (d, args[i].value, v);
   }
+  mq_foreign_get_values_hook (w, args, n);
 }
 
 void XtSetValues (Widget w, ArgList args, Cardinal n)
@@ -1511,20 +1526,79 @@ String XtFindFile (_Xconst char *path, Substitution, Cardinal, XtFilePredicate)
   return path && access (path, R_OK) == 0 ? XtNewString ((char *) path) : nullptr;
 }
 
-void XtSetTypeConverter (_Xconst char *, _Xconst char *, XtTypeConverter, XtConvertArgList, Cardinal, XtCacheType, XtDestructor) {}
-void XtAppSetTypeConverter (XtAppContext, _Xconst char *, _Xconst char *, XtTypeConverter, XtConvertArgList, Cardinal, XtCacheType, XtDestructor) {}
-void XtAppAddConverter (XtAppContext, _Xconst char *, _Xconst char *, XtConverter, XtConvertArgList, Cardinal) {}
-void XtAddConverter (_Xconst char *, _Xconst char *, XtConverter, XtConvertArgList, Cardinal) {}
+void XtSetTypeConverter (_Xconst char *from, _Xconst char *to, XtTypeConverter c, XtConvertArgList args, Cardinal n, XtCacheType, XtDestructor)
+{
+  mq_add_converter (from, to, c, nullptr, args, n);
+}
+void XtAppSetTypeConverter (XtAppContext, _Xconst char *from, _Xconst char *to, XtTypeConverter c, XtConvertArgList args, Cardinal n, XtCacheType, XtDestructor)
+{
+  mq_add_converter (from, to, c, nullptr, args, n);
+}
+void XtAppAddConverter (XtAppContext, _Xconst char *from, _Xconst char *to, XtConverter c, XtConvertArgList args, Cardinal n)
+{
+  mq_add_converter (from, to, nullptr, c, args, n);
+}
+void XtAddConverter (_Xconst char *from, _Xconst char *to, XtConverter c, XtConvertArgList args, Cardinal n)
+{
+  mq_add_converter (from, to, nullptr, c, args, n);
+}
 
 Boolean XtConvertAndStore (Widget w, _Xconst char *from_type, XrmValue *from, _Xconst char *to_type, XrmValue *to)
 {
-  if (!from || !to || strcmp (from_type, XtRString)) return False;
+  if (!from || !to) return False;
+  if (mq_program_convert (w, from_type, from, to_type, to)) return True;
+  if (strcmp (from_type, XtRString) && strcmp (from_type, XmRString)) return False;
   ResDef d { "", false, "", "", to_type, to->size ? to->size : (unsigned) sizeof (XtArgVal), XtRString, 0, nullptr };
   static XtArgVal result;
   if (!mq_convert (w, &d, (const char *) from->addr, &result)) return False;
   if (to->addr) memcpy (to->addr, &result, qMin ((size_t) to->size, sizeof (XtArgVal)));
   else { to->addr = (XPointer) &result; to->size = sizeof (result); }
   return True;
+}
+
+/* Xt's own helpers for widgets that keep resources outside their record
+ * (libXaw's input method code): an argument value to and from storage */
+void _XtCopyFromArg (XtArgVal src, char *dst, unsigned int size)
+{
+  if (size > sizeof (XtArgVal)) { memmove (dst, (char *) src, size); return; }
+  union { long l; int i; short s; char c; XtArgVal v; } u;
+  if (size == sizeof (long)) u.l = (long) src;
+  else if (size == sizeof (int)) u.i = (int) src;
+  else if (size == sizeof (short)) u.s = (short) src;
+  else if (size == sizeof (char)) u.c = (char) src;
+  else u.v = src;
+  memmove (dst, &u, size);
+}
+
+void _XtCopyToArg (char *src, XtArgVal *dst, unsigned int size)
+{
+  if (!*dst) {
+    /* no address: the value itself */
+    if (size == sizeof (long)) *dst = (XtArgVal) *(long *) src;
+    else if (size == sizeof (int)) *dst = (XtArgVal) *(int *) src;
+    else if (size == sizeof (short)) *dst = (XtArgVal) *(short *) src;
+    else if (size == sizeof (char)) *dst = (XtArgVal) *(char *) src;
+    else memcpy (dst, src, qMin ((size_t) size, sizeof (XtArgVal)));
+  } else memmove ((char *) *dst, src, size);
+}
+
+/* the Xt 1 interface: the result stays in static storage */
+void XtConvert (Widget w, _Xconst char *from_type, XrmValue *from, _Xconst char *to_type, XrmValue *to)
+{
+  to->addr = nullptr;
+  to->size = 0;
+  if (!XtConvertAndStore (w, from_type, from, to_type, to)) { to->addr = nullptr; to->size = 0; }
+}
+
+/* a copy of the class's action table, which the caller frees */
+void XtGetActionList (WidgetClass wc, XtActionList *list, Cardinal *n)
+{
+  *list = nullptr;
+  *n = 0;
+  if (!wc || !wc->core_class.num_actions || !wc->core_class.actions) return;
+  *n = wc->core_class.num_actions;
+  *list = (XtActionList) XtMalloc (*n * sizeof (XtActionsRec));
+  memcpy (*list, wc->core_class.actions, *n * sizeof (XtActionsRec));
 }
 
 void XmAddProtocolCallback (Widget shell, Atom, Atom protocol, XtCallbackProc cb, XtPointer closure)
@@ -1550,3 +1624,68 @@ void XmDeactivateProtocol (Widget, Atom, Atom) {}
 void XmSetProtocolHooks (Widget, Atom, Atom, XtCallbackProc, XtPointer, XtCallbackProc, XtPointer) {}
 
 } /* extern "C" */
+
+/* Athena tooltips (src/xaw/xaw_tip.c): the widget's tip is its Qt tooltip */
+extern "C" void mq_set_tooltip (Widget w, const char *text)
+{
+  if (QWidget *qw = w ? mq_qw (w) : nullptr) qw->setToolTip (mq_mb_decode (text));
+}
+
+/* ---------- Xt calls of the Athena widgets and Xmu ---------- */
+extern "C" {
+/* a class's realize method: the widget's window is its Qt widget's */
+void XtCreateWindow (Widget w, unsigned int, Visual *, XtValueMask mask, XSetWindowAttributes *attrs)
+{
+  Window win = mq_window_for (w);
+  if (!win || !attrs) return;
+  if (mask & CWBackPixel) XSetWindowBackground (XtDisplay (w), win, attrs->background_pixel);
+  if (mask & CWCursor) XDefineCursor (XtDisplay (w), win, attrs->cursor);
+}
+
+/* class initialization: ours are ready, a program's class gets its run now */
+void XtInitializeWidgetClass (WidgetClass c) { if (c && !mq_class (c)) mq_foreign_class (c); }
+
+void XtGetConstraintResourceList (WidgetClass c, XtResourceList *list, Cardinal *num)
+{
+  if (list) *list = nullptr;
+  if (num) *num = 0;
+  WidgetClass k = c;
+  bool constraint = false;
+  for (; k; k = k->core_class.superclass) if (k == constraintWidgetClass) { constraint = true; break; }
+  if (!constraint) return;
+  auto *cc = reinterpret_cast<ConstraintWidgetClass> (c);
+  Cardinal n = cc->constraint_class.num_resources;
+  if (!n || !cc->constraint_class.resources) return;
+  auto *out = (XtResourceList) XtMalloc (n * sizeof (XtResource));
+  memcpy (out, cc->constraint_class.resources, n * sizeof (XtResource));
+  if (list) *list = out; else XtFree ((char *) out);
+  if (num) *num = n;
+}
+
+Boolean XtCallConverter (Display *d, XtTypeConverter converter, XrmValuePtr args, Cardinal num_args,
+                         XrmValuePtr from, XrmValuePtr to, XtCacheRef *cache_ref)
+{
+  if (cache_ref) *cache_ref = nullptr;
+  if (!converter) return False;
+  XtPointer closure = nullptr;
+  return converter (d, args, &num_args, from, to, &closure);
+}
+
+Boolean XtCvtStringToFont (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  static Font f;
+  f = XLoadFont (d, from && from->addr ? (const char *) from->addr : "fixed");
+  if (!to) return False;
+  if (to->addr) {
+    if (to->size < sizeof (Font)) { to->size = sizeof (Font); return False; }
+    *(Font *) to->addr = f;
+  } else to->addr = (XPointer) &f;
+  to->size = sizeof (Font);
+  return True;
+}
+
+void XtStringConversionWarning (_Xconst char *from, _Xconst char *to_type)
+{
+  fprintf (stderr, "Warning: Cannot convert string \"%s\" to type %s\n", from ? from : "", to_type ? to_type : "");
+}
+}

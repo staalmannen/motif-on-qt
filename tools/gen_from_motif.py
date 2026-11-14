@@ -34,7 +34,9 @@ def class_name(src):
 
 for c in sorted(glob.glob(os.path.join(motif, "lib", "Xm", "*.c"))):
     src = strip_comments(open(c).read())
-    cls = class_name(src)
+    # the Text widget's input and output halves keep their resources in
+    # files of their own (rows, columns, wordWrap, scrollVertical ...)
+    cls = class_name(src) or {"TextIn.c": "XmText", "TextOut.c": "XmText"}.get(os.path.basename(c))
     if not cls: continue
     for arr in re.finditer(r"static\s+XtResource\s+(\w+)\s*\[\s*\]\s*=\s*\{(.*?)\n\s*\}\s*;", src, re.S):
         kind = "constraint" if "constraint" in arr.group(1).lower() else "normal"

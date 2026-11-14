@@ -1,8 +1,8 @@
 # Motif on Qt (motif-on-qt)
 
 The Xt/Motif C API, and the part of Xlib Motif programs use, implemented on
-Qt 6, so unmodified Motif programs compile and run without X11 or libXm.
-Static library; programs depend only on Qt at run time.
+Qt 6, so unmodified Motif and Athena (Xaw) programs compile and run without
+X11, libXm or libXaw. Static library; programs depend only on Qt at run time.
 
 ## Commands
 
@@ -23,6 +23,9 @@ quit"` (see docs/testing.md).
   sources (tools/gen_from_motif.py) - do not edit by hand
 - `src/xt_*.cpp` Xt (core, resources, events, selections, program-defined
   classes), `src/xlib.cpp` Xlib on QPainter, `src/xm_*.cpp` Motif widgets
+- `src/xaw/`, `src/xmu/` genuine libXaw 1.0.16 / libXmu 1.1.3 sources (MIT),
+  unmodified, run as foreign classes on our Xt (`src/xaw/xaw_tip.c` and
+  `config.h` are ours); `src/xpm.cpp` the Xpm API
 - `examples/` Motif's own demos, unmodified; `tests/` our regression programs
 
 ## Conventions
@@ -35,6 +38,9 @@ quit"` (see docs/testing.md).
   `mq_sync_core` / `mq_sync_children`
 - Classes are defined with `MQ_DEFINE_CLASS` / `MQ_DEFINE_CLASS_XT`;
   superclasses by `&xxx_rec`, never `mq_class(...)` (static init order)
+- Fix gaps under libXaw (Xt, Xlib), never in the vendored sources
+- Program text goes through `mq_mb_decode`/`mq_mb_encode`, not
+  `fromLocal8Bit`
 - Verify against real Motif: same program built with system libXm under
   Xvfb, screenshots side by side (docs/testing.md); run valgrind on changes
   to memory layout

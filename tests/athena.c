@@ -1,0 +1,168 @@
+/*
+ * What DDD needs from the layers under Motif: the Athena widgets (genuine
+ * libXaw on our Xt), Xpm images, font sets, converters a program registers,
+ * the XmIsXxx macros of XmP.h, XtIsTopLevelShell, XmText rows/columns,
+ * programmatic text changes that pass no event to modifyVerify, and Latin-1
+ * text. Built as plain C, run headless.
+ */
+#include <Xm/XmP.h>
+#include <Xm/Text.h>
+#include <Xm/Form.h>
+#include <Xm/Label.h>
+#include <Xm/ScrolledW.h>
+#include <X11/Xaw/Paned.h>
+#include <X11/Xaw/Box.h>
+#include <X11/Xaw/Command.h>
+#include <X11/Xaw/Panner.h>
+/* Xm.h's FMT8BIT macro clashes with the variable Xaw's Text.h declares
+ * (with the real libraries too) */
+#undef FMT8BIT
+#undef FMT16BIT
+#include <X11/Xaw/AsciiText.h>
+#include <X11/xpm.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define CHECK(expr) do { if (!(expr)) { fprintf (stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit (1); } } while (0)
+
+static XtAppContext app;
+static Widget top, box, quit, panner, text, mtext;
+static int converted, vetoed;
+
+/* a program's own String -> XmString converter (as DDD's "@bf" markup) */
+static Boolean cvt_xmstring (Display *d, XrmValue *args, Cardinal *n, XrmValue *from, XrmValue *to, XtPointer *data)
+{
+  static XmString s;
+  const char *src = (const char *) from->addr;
+  converted++;
+  s = XmStringCreateLocalized ((char *) (strncmp (src, "@bf ", 4) == 0 ? src + 4 : src));
+  if (to->addr) {
+    if (to->size < sizeof (XmString)) { to->size = sizeof (XmString); return False; }
+    *(XmString *) to->addr = s;
+  } else to->addr = (XPointer) &s;
+  to->size = sizeof (XmString);
+  return True;
+}
+
+/* DDD's read-only source window: only the user's edits carry an event */
+static void no_user_edits (Widget w, XtPointer c, XtPointer call)
+{
+  XmTextVerifyCallbackStruct *cbs = (XmTextVerifyCallbackStruct *) call;
+  if (cbs->event) { cbs->doit = False; vetoed++; }
+}
+
+static const char *xpm[] = {
+  "4 2 3 1",
+  "  c None",
+  ". c red",
+  "X s fg c blue",
+  " .X.",
+  "X.. ",
+};
+
+static void late_checks (XtPointer p, XtIntervalId *id)
+{
+  /* Box laid out its children and kept them mapped (XMapSubwindows) */
+  Dimension bh = 0, qw = 0;
+  XtVaGetValues (box, XtNheight, &bh, NULL);
+  XtVaGetValues (quit, XtNwidth, &qw, NULL);
+  CHECK (XtIsManaged (quit) && quit->core.managed);
+  CHECK (bh > 10 && qw > 10);
+
+  /* the text widget's string comes from its source (get_values_hook) */
+  char *s = NULL;
+  XtVaGetValues (text, XtNstring, &s, NULL);
+  CHECK (s && strcmp (s, "Hello Athena") == 0);
+  CHECK (XawTextGetInsertionPoint (text) == 5);
+  printf ("ok\n");
+  exit (0);
+}
+
+int main (int argc, char **argv)
+{
+  XtSetTypeConverter (XmRString, XmRXmString, cvt_xmstring, NULL, 0, XtCacheNone, NULL);
+  top = XtVaAppInitialize (&app, "Athena", NULL, 0, &argc, argv, NULL, NULL);
+  CHECK (XtIsTopLevelShell (top) && XtIsWMShell (top));
+
+  /* Athena */
+  Widget paned = XtCreateManagedWidget ("paned", panedWidgetClass, top, NULL, 0);
+  box = XtCreateManagedWidget ("box", boxWidgetClass, paned, NULL, 0);
+  quit = XtCreateManagedWidget ("Quit", commandWidgetClass, box, NULL, 0);
+  panner = XtCreateManagedWidget ("panner", pannerWidgetClass, box, NULL, 0);
+  text = XtVaCreateManagedWidget ("text", asciiTextWidgetClass, paned, XtNeditType, XawtextEdit,
+                                  XtNstring, "Hello Athena", XtNwidth, 200, XtNheight, 40, NULL);
+  XawTextSetInsertionPoint (text, 5);
+
+  /* Motif in the same program; the converter turns resources into labels */
+  Widget form = XtVaCreateManagedWidget ("form", xmFormWidgetClass, paned, NULL);
+  XrmValue from, to;
+  XmString label = NULL;
+  from.addr = (XPointer) "@bf Bold";
+  from.size = strlen (from.addr) + 1;
+  to.addr = (XPointer) &label;
+  to.size = sizeof label;
+  CHECK (XtConvertAndStore (form, XmRString, &from, XmRXmString, &to) && label);
+  CHECK (converted == 1);
+  char *plain = NULL;
+  XmStringGetLtoR (label, XmFONTLIST_DEFAULT_TAG, &plain);
+  CHECK (plain && strcmp (plain, "Bold") == 0);
+
+  Arg a[3];
+  XtSetArg (a[0], XmNrows, 10);
+  XtSetArg (a[1], XmNcolumns, 40);
+  XtSetArg (a[2], XmNeditMode, XmMULTI_LINE_EDIT);
+  mtext = XmCreateScrolledText (form, "source", a, 3);
+  XtManageChild (mtext);
+  CHECK (XmIsScrolledWindow (XtParent (mtext)) && XmIsText (mtext) && XmIsManager (form) && !XmIsPrimitive (form));
+  short rows = 0, cols = 0;
+  XtVaGetValues (mtext, XmNrows, &rows, XmNcolumns, &cols, NULL);
+  CHECK (rows == 10 && cols == 40);
+  XtWidgetGeometry g;
+  g.request_mode = 0;
+  XtQueryGeometry (mtext, NULL, &g);
+  CHECK (g.height > 5 * 10 && g.width > 4 * 40);
+
+  XtAddCallback (mtext, XmNmodifyVerifyCallback, no_user_edits, NULL);
+  XmTextSetString (mtext, "  1 #include <stdio.h>\n  2 int main;");
+  XmTextReplace (mtext, 0, 1, " ");
+  CHECK (vetoed == 0 && XmTextGetLastPosition (mtext) == 36);
+
+  /* Latin-1 bytes (DDD's sources, gdb in the C locale) come back unchanged */
+  XmTextSetString (mtext, "Copyright \251 L\374tkehaus");
+  char *back = XmTextGetString (mtext);
+  CHECK (back && strcmp (back, "Copyright \251 L\374tkehaus") == 0);
+  XtFree (back);
+
+  /* Xpm images: the parsed form and back */
+  XpmImage im;
+  XpmInfo info;
+  CHECK (XpmCreateXpmImageFromData ((char **) xpm, &im, &info) == XpmSuccess);
+  CHECK (im.width == 4 && im.height == 2 && im.ncolors == 3 && strcmp (im.colorTable[2].symbolic, "fg") == 0);
+  Pixmap pm = 0, mask = 0;
+  XpmAttributes attr;
+  attr.valuemask = 0;
+  CHECK (XpmCreatePixmapFromXpmImage (XtDisplay (top), DefaultRootWindow (XtDisplay (top)), &im, &pm, &mask, &attr) == XpmSuccess);
+  CHECK (pm && mask && attr.width == 4 && attr.height == 2);
+  XImage *xi = NULL;
+  CHECK (XpmCreateImageFromXpmImage (XtDisplay (top), &im, &xi, NULL, NULL) == XpmSuccess);
+  CHECK (XGetPixel (xi, 1, 0) == 0xff0000 && XGetPixel (xi, 2, 0) == 0x0000ff);
+  XDestroyImage (xi);
+  XpmFreeXpmImage (&im);
+  XpmFreeXpmInfo (&info);
+
+  /* font sets */
+  char **missing, *def;
+  int nmissing;
+  XFontSet fs = XCreateFontSet (XtDisplay (top), "-*-helvetica-medium-r-*-*-12-*,*", &missing, &nmissing, &def);
+  CHECK (fs && nmissing == 0);
+  CHECK (XmbTextEscapement (fs, "Hello", 5) > XmbTextEscapement (fs, "Hi", 2));
+  XFontSetExtents *ext = XExtentsOfFontSet (fs);
+  CHECK (ext && ext->max_logical_extent.height > 5);
+  XFreeFontSet (XtDisplay (top), fs);
+
+  XtRealizeWidget (top);
+  XtAppAddTimeOut (app, 300, late_checks, NULL);
+  XtAppMainLoop (app);
+  return 1;
+}

@@ -476,16 +476,18 @@ static EventMask translations_mask (XtTranslations t)
  * Timers, work procs, inputs
  * ====================================================================== */
 struct TimerRec { QTimer *timer; XtTimerCallbackProc proc; XtPointer closure; };
-static QHash<XtIntervalId, TimerRec> s_timers;
+/* never destroyed: programs remove timers and inputs from their own static
+ * destructors at exit (DDD's agents) */
+static QHash<XtIntervalId, TimerRec> &s_timers = *new QHash<XtIntervalId, TimerRec>;
 static XtIntervalId s_next_timer = 1;
 
 struct WorkRec { XtWorkProc proc; XtPointer closure; };
-static QMap<XtWorkProcId, WorkRec> s_work;
+static QMap<XtWorkProcId, WorkRec> &s_work = *new QMap<XtWorkProcId, WorkRec>;
 static XtWorkProcId s_next_work = 1;
 static QTimer *s_work_timer = nullptr;
 
 struct InputRec { QList<QSocketNotifier *> notifiers; XtInputCallbackProc proc; XtPointer closure; int source; };
-static QHash<XtInputId, InputRec> s_inputs;
+static QHash<XtInputId, InputRec> &s_inputs = *new QHash<XtInputId, InputRec>;
 static XtInputId s_next_input = 1;
 
 static void run_work ()
@@ -789,3 +791,15 @@ void XtTranslateKeycode (Display *dpy, _XtKeyCode keycode, Modifiers modifiers, 
 
 /* the one display lives as long as the program */
 void XtCloseDisplay (Display *) {}
+
+/* Grabs: Qt's popups take the pointer and keyboard themselves */
+extern "C" {
+int XtGrabKeyboard (Widget, _XtBoolean, int, int, Time) { return GrabSuccess; }
+void XtUngrabKeyboard (Widget, Time) {}
+int XtGrabPointer (Widget, _XtBoolean, unsigned int, int, int, Window, Cursor, Time) { return GrabSuccess; }
+void XtUngrabPointer (Widget, Time) {}
+
+/* session management: there is no session manager to answer */
+XtCheckpointToken XtSessionGetToken (Widget) { return nullptr; }
+void XtSessionReturnToken (XtCheckpointToken) {}
+}

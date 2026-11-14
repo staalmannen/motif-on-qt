@@ -40,15 +40,15 @@ void mq_builtin_action (Widget w, const QByteArray &name, XEvent *xe, String *pa
     if (auto *b = mq_q<QAbstractButton> (w)) b->click ();
   } else if (name == "self-insert" || name == "insert-string") {
     QString s;
-    if (name == "insert-string") for (Cardinal i = 0; i < *n; i++) s += QString::fromLocal8Bit (params[i]);
+    if (name == "insert-string") for (Cardinal i = 0; i < *n; i++) s += mq_mb_decode (params[i]);
     else if (xe && (xe->type == KeyPress)) {
       char buf[16];
       KeySym ks;
       int len = XLookupString (&xe->xkey, buf, sizeof buf, &ks, nullptr);
-      s = QString::fromLocal8Bit (buf, len);
+      s = mq_mb_decode (buf, len);
     }
     if (!s.isEmpty ()) {
-      QByteArray b = s.toLocal8Bit ();
+      QByteArray b = mq_mb_encode (s);
       XmTextInsert (w, XmTextGetInsertionPosition (w), b.data ());
       XmTextSetInsertionPosition (w, XmTextGetInsertionPosition (w) + s.size ());
     }
@@ -165,13 +165,9 @@ Boolean XmInstallImage (XImage *image, char *name)
   QImage img (image->width, image->height, QImage::Format_RGB32);
   for (int y = 0; y < image->height; y++)
     for (int x = 0; x < image->width; x++) {
-      unsigned long p;
-      if (image->depth == 1 || image->format == XYBitmap) {
-        int bpl = image->bytes_per_line;
-        unsigned char byte = ((unsigned char *) image->data)[y * bpl + x / 8];
-        bool bit = image->bitmap_bit_order == LSBFirst ? (byte >> (x % 8)) & 1 : (byte >> (7 - x % 8)) & 1;
-        p = bit ? 0xffffff : 0;
-      } else p = XGetPixel (image, x, y);
+      /* XGetPixel knows the image's layout (bitmap unit, bit and byte order) */
+      unsigned long p = XGetPixel (image, x, y);
+      if (image->depth == 1 || image->format == XYBitmap) p = p ? 0xffffff : 0;
       img.setPixel (x, y, 0xff000000 | p);
     }
   if (image->depth == 1 || image->format == XYBitmap) img = img.convertToFormat (QImage::Format_Mono);
@@ -511,7 +507,7 @@ int XmClipboardCopy (Display *, Window, long itemid, char *format, XtPointer buf
   auto it = s_clip_pending.find (itemid);
   if (it == s_clip_pending.end ()) return ClipboardFail;
   QByteArray data ((const char *) buffer, buffer ? (int) length : 0);
-  if (clip_mime (format) == "text/plain") it->data->setText (QString::fromLocal8Bit (data));
+  if (clip_mime (format) == "text/plain") it->data->setText (mq_mb_decode (data));
   else it->data->setData (clip_mime (format), data);
   if (dataid) *dataid = itemid;
   return ClipboardSuccess;
@@ -547,7 +543,7 @@ static QByteArray clip_get (const char *format)
   const QMimeData *m = QGuiApplication::clipboard ()->mimeData ();
   if (!m) return QByteArray ();
   QString mime = clip_mime (format);
-  if (mime == "text/plain") return m->text ().toLocal8Bit ();
+  if (mime == "text/plain") return mq_mb_encode (m->text ());
   return m->data (mime);
 }
 
@@ -839,6 +835,55 @@ XmGenericClassExt *_XmGetClassExtensionPtr (XmGenericClassExt *list, XrmQuark ow
   while (p && *p && (*p)->record_type != owner) p = (XmGenericClassExt *) &(*p)->next_extension;
   return p;
 }
+
+/* Motif's base class extension: XmP.h's XmIsXxx macros test the fast
+ * subclass bits in it. Each Motif class gets one, with its superclasses'
+ * bits and its own, as _XmBaseClassPartInitialize does; a program's
+ * subclass of a Motif class gets a copy of its superclass's (and may add
+ * its own bits with _XmFastSubclassInit). */
+static const struct { const char *name; int bit; } fast_bits[] = {
+  { "XmCascadeButton", XmCASCADE_BUTTON_BIT }, { "XmCascadeButtonGadget", XmCASCADE_BUTTON_GADGET_BIT },
+  { "XmCommand", XmCOMMAND_BOX_BIT }, { "XmDialogShell", XmDIALOG_SHELL_BIT }, { "XmList", XmLIST_BIT },
+  { "XmForm", XmFORM_BIT }, { "XmTextField", XmTEXT_FIELD_BIT }, { "XmGadget", XmGADGET_BIT },
+  { "XmLabel", XmLABEL_BIT }, { "XmLabelGadget", XmLABEL_GADGET_BIT }, { "XmMainWindow", XmMAIN_WINDOW_BIT },
+  { "XmManager", XmMANAGER_BIT }, { "XmMenuShell", XmMENU_SHELL_BIT }, { "XmDrawnButton", XmDRAWN_BUTTON_BIT },
+  { "XmPrimitive", XmPRIMITIVE_BIT }, { "XmPushButton", XmPUSH_BUTTON_BIT },
+  { "XmPushButtonGadget", XmPUSH_BUTTON_GADGET_BIT }, { "XmRowColumn", XmROW_COLUMN_BIT },
+  { "XmScrollBar", XmSCROLL_BAR_BIT }, { "XmScrolledWindow", XmSCROLLED_WINDOW_BIT },
+  { "XmSelectionBox", XmSELECTION_BOX_BIT }, { "XmSeparator", XmSEPARATOR_BIT },
+  { "XmSeparatorGadget", XmSEPARATOR_GADGET_BIT }, { "XmText", XmTEXT_BIT },
+  { "XmToggleButton", XmTOGGLE_BUTTON_BIT }, { "XmToggleButtonGadget", XmTOGGLE_BUTTON_GADGET_BIT },
+  { "XmDisplay", XmDISPLAY_BIT }, { "XmScreen", XmSCREEN_BIT }, { "XmArrowButton", XmARROW_BUTTON_BIT },
+  { "XmArrowButtonGadget", XmARROW_BUTTON_GADGET_BIT }, { "XmBulletinBoard", XmBULLETIN_BOARD_BIT },
+  { "XmDrawingArea", XmDRAWING_AREA_BIT }, { "XmFileSelectionBox", XmFILE_SELECTION_BOX_BIT },
+  { "XmFrame", XmFRAME_BIT }, { "XmMessageBox", XmMESSAGE_BOX_BIT }, { "XmScale", XmSCALE_BIT },
+  { "XmPanedWindow", XmPANED_WINDOW_BIT }, { "VendorShell", XmVENDOR_SHELL_BIT },
+  { "XmComboBox", XmCOMBO_BOX_BIT }, { "XmSpinBox", XmSPINBOX_BIT }, { "XmDropDown", XmDROP_DOWN_BIT },
+};
+
+static XmBaseClassExt motif_ext (WidgetClass c)
+{
+  if (!c) return nullptr;
+  if (!XmQmotif) XmQmotif = XrmPermStringToQuark ("motif");
+  XmBaseClassExt *p = _XmGetBaseClassExtPtr (c, XmQmotif);
+  if (p && *p) return *p;
+  XmBaseClassExt super = motif_ext (c->core_class.superclass);
+  int bit = 0;
+  for (const auto &fb : fast_bits)
+    if (c->core_class.class_name && !strcmp (c->core_class.class_name, fb.name)) bit = fb.bit;
+  if (!super && !bit) return nullptr;   /* not a Motif class */
+  auto *ext = (XmBaseClassExt) calloc (1, sizeof (XmBaseClassExtRec));
+  ext->next_extension = c->core_class.extension;
+  ext->record_type = XmQmotif;
+  ext->version = XmBaseClassExtVersion;
+  ext->record_size = sizeof (XmBaseClassExtRec);
+  if (super) memcpy (ext->flags, super->flags, sizeof ext->flags);
+  if (bit) _XmSetFlagsBit (ext->flags, bit);
+  c->core_class.extension = ext;
+  return ext;
+}
+
+void mq_motif_class_extension (WidgetClass c) { motif_ext (c); }
 
 /* our internal and external XmStrings are the same */
 XmString _XmStringCreateExternal (XmRenderTable, _XmString cs) { return cs ? XmStringCopy ((XmString) cs) : nullptr; }

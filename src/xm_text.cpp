@@ -9,8 +9,8 @@
 #define PRIMK (K_RECT | K_WIDGET | K_PRIMITIVE)
 #define MGRK (K_RECT | K_WIDGET | K_COMPOSITE | K_CONSTRAINT | K_MANAGER)
 
-static QByteArray local (const QString &s) { return s.toLocal8Bit (); }
-static QString qstr (const char *s) { return s ? QString::fromLocal8Bit (s) : QString (); }
+static QByteArray local (const QString &s) { return mq_mb_encode (s); }
+static QString qstr (const char *s) { return mq_mb_decode (s); }
 
 /* ======================================================================
  * XmText / XmTextField
@@ -107,7 +107,10 @@ static void value_changed (Widget w)
 
 /* Run the modify-verify callbacks for replacing [start, end) by text.
  * Returns false if the change was refused; may rewrite text. */
-static bool verify (Widget w, int start, int end, QString *text)
+/* event: the user's key or button event; null for changes the program
+ * makes (XmTextSetString, XmTextReplace ...), as in Motif - programs veto
+ * only the user's edits by testing it (DDD's read-only source window) */
+static bool verify (Widget w, int start, int end, QString *text, XEvent *event)
 {
   if (!mq_has_callbacks (w, XmNmodifyVerifyCallback)) return true;
   QByteArray b = local (*text);
@@ -118,7 +121,7 @@ static bool verify (Widget w, int start, int end, QString *text)
   XmTextVerifyCallbackStruct cs;
   memset (&cs, 0, sizeof cs);
   cs.reason = XmCR_MODIFYING_TEXT_VALUE;
-  cs.event = mq_current_event ();
+  cs.event = event;
   cs.doit = True;
   cs.currInsert = text_cursor (w);
   cs.newInsert = start + text->size ();
@@ -127,7 +130,7 @@ static bool verify (Widget w, int start, int end, QString *text)
   cs.text = &block;
   mq_call (w, XmNmodifyVerifyCallback, &cs);
   bool ok = cs.doit;
-  if (ok) *text = cs.text->ptr ? QString::fromLocal8Bit (cs.text->ptr, cs.text->length) : QString ();
+  if (ok) *text = cs.text->ptr ? mq_mb_decode (cs.text->ptr, cs.text->length) : QString ();
   XtFree (block.ptr == cs.text->ptr ? block.ptr : cs.text->ptr);
   if (block.ptr != cs.text->ptr) XtFree (block.ptr);
   return ok;
@@ -147,7 +150,7 @@ static void text_changed (Widget w)
   QString inserted = now.mid (pre, now.size () - pre - suf);
   QString want = inserted;
   int cursor = text_cursor (w);
-  if (!verify (w, pre, old.size () - suf, &want)) {
+  if (!verify (w, pre, old.size () - suf, &want, mq_current_event ())) {
     QApplication::beep ();
     text_set_raw (w, old);
     text_set_cursor (w, pre);
@@ -171,7 +174,7 @@ static void text_replace (Widget w, int from, int to, const QString &s, bool not
   from = qBound (0, from, (int) old.size ());
   to = qBound (from, to, (int) old.size ());
   QString ins = s;
-  if (notify && !verify (w, from, to, &ins)) return;
+  if (notify && !verify (w, from, to, &ins, nullptr)) return;
   int max = mq_geti (w, XmNmaxLength);
   QString now = old.left (from) + ins + old.mid (to);
   if (max > 0 && now.size () > max) now.truncate (max);
@@ -268,7 +271,7 @@ static void text_apply (Widget w, const QByteArray &res)
     const char *v = (const char *) mq_get (w, XmNvalue);
     if (!all || v) {
       QString s = qstr (v);
-      if (!all) { QString t = s; if (verify (w, 0, text_get (w).size (), &t)) s = t; else return; }
+      if (!all) { QString t = s; if (verify (w, 0, text_get (w).size (), &t, nullptr)) s = t; else return; }
       text_set_raw (w, s);
       if (!all) value_changed (w);
     }
@@ -1623,7 +1626,7 @@ static void dd_popdown (Widget w, bool take_text)
     int n = 0;
     XtVaGetValues (list, XmNselectedItems, &sel, XmNselectedItemCount, &n, NULL);
     if (n > 0 && text && !mq_getb (w, XmNcustomizedCombinationBox)) {
-      QByteArray b = mq_xmstring_text (sel[0]).toLocal8Bit ();
+      QByteArray b = mq_mb_encode (mq_xmstring_text (sel[0]));
       XmTextFieldSetString (text, b.data ());
     }
   }

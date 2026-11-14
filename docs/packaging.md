@@ -14,9 +14,10 @@ A build-time package. Installed layout (`libdir` is `/usr/lib` on Arch,
 /usr/include/motif-on-qt/{X11,Xm}/       the X11, Xt and Motif headers
 <libdir>/motif-on-qt/libmotif-on-qt.a    the library (static)
 <libdir>/motif-on-qt/libXm.so, libXt.so, libX11.so, libXext.so, libXmu.so,
-                     libXpm.so, libICE.so, libSM.so, libMrm.so
+                     libXmuu.so, libXaw.so, libXaw7.so, libXpm.so,
+                     libICE.so, libSM.so, libMrm.so
                                          GNU ld scripts: the archive + Qt
-<libdir>/motif-on-qt/pkgconfig/          x11.pc, xt.pc, motif.pc ... for builds
+<libdir>/motif-on-qt/pkgconfig/          x11.pc, xt.pc, motif.pc, xaw7.pc, xmu.pc, xpm.pc ... for builds
 <libdir>/pkgconfig/motif-on-qt.pc        found without extra settings
 /usr/share/doc/motif-on-qt/
 ```

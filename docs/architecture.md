@@ -86,6 +86,36 @@ raster ops, arcs in 1/64 degrees). Fonts are XLFD/fontconfig names mapped to
 QFont. Colours parse X names, `rgb:` and `#` specs; the visual is 24-bit
 TrueColor. Showing, resizing and XClearArea produce Expose events.
 
+## Athena, Xmu, Xpm
+
+`src/xaw/` and `src/xmu/` are the genuine libXaw 1.0.16 and libXmu 1.1.3
+sources (Vendor.c and Tip.c left out: Motif's VendorShell stays, and Athena
+tips become Qt tooltips in `xaw_tip.c`). Their classes are program-defined
+classes to our Xt (xt_foreign.cpp) and draw through our Xlib, so nothing in
+them is patched: what they need goes into Xt and Xlib, where Motif programs
+benefit too - `core.managed` set by XtManageChild, `get_values_hook`,
+`XMapSubwindows`, font sets (one QFont each), `_XtCopyFromArg`. There is no
+X input method: `XOpenIM` fails and libXaw falls back to `XLookupString`.
+`src/xpm.cpp` reads XPM data, buffers and files into pixmaps, XImages and
+XpmImage.
+
+## Converters and class bits
+
+Converters a program registers (`XtSetTypeConverter`, `XtAddConverter`)
+take precedence over our built-in string conversions, with their
+conversion arguments computed as Xt does (`XtBaseOffset`, `XtResourceString`
+...). Every Motif class record carries Motif's base class extension
+(`XmQmotif`) with the fast subclass bits, so the `XmIsXxx` macros of `XmP.h`
+work; program subclasses inherit a copy before their `class_part_initialize`.
+`class_inited` has Xt's WMShell and TopLevelShell bits.
+
+## Text encoding
+
+Program text (XmText, XmString, titles, the clipboard, `Xmb*`) is decoded
+by `mq_mb_decode`: valid UTF-8 is UTF-8, anything else is the locale's 8-bit
+codeset, Latin-1 in the C locale. `mq_mb_encode` writes back UTF-8 under a
+UTF-8 locale and Latin-1 when the text fits, so Latin-1 round-trips.
+
 ## Events
 
 `XtAppMainLoop` runs the Qt event loop. An event filter per widget turns Qt

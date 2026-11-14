@@ -75,6 +75,31 @@ Things that cost time once; check here before debugging something similar.
 - Without a display, XtOpenDisplay returns NULL (programs still answer
   `-version`); Qt would abort.
 
+## Lessons from DDD and Athena
+
+- Programs veto only the user's edits in modifyVerify by testing
+  `cbs->event`: XmTextSetString and XmTextReplace pass no event (DDD's
+  read-only source window stayed empty).
+- Programs replace Xt's converters (DDD's String to XmString reads `@bf`
+  font changes); registered converters must win over built-in ones.
+- `XmP.h` redefines `XmIsXxx` as fast-subclass bit tests in the class's
+  `XmQmotif` extension; `XtIsTopLevelShell` tests a `class_inited` bit.
+- Real Xt sets `core.managed` in XtManageChild, and Athena's Box lays out
+  from it; Box unmaps children while it moves them and maps them back with
+  `XMapSubwindows`.
+- XmText's rows, columns, wordWrap, scrollVertical ... live in TextIn.c and
+  TextOut.c, which have no class record: the generator maps them to XmText.
+- Programs remove timers and inputs from their own static destructors at
+  exit: Xt's tables must outlive them.
+- Old programs write Latin-1 whatever the locale (DDD's sources, gdb in the
+  C locale): Qt's fromLocal8Bit is always UTF-8, so decode invalid UTF-8 as
+  Latin-1.
+- `XtRFontStruct` resources are XFontStruct pointers, not font lists.
+- Xm.h's `FMT8BIT` macro clashes with Xaw's Text.h, as with the real
+  libraries.
+- Rebuilding a program after the library changed: make does not see the
+  installed archive change; remove the binary to relink.
+
 ## Build and link
 
 - Generated tables: names/types only defined in Motif's private headers
