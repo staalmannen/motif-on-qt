@@ -70,6 +70,13 @@ static void late_checks (XtPointer p, XtIntervalId *id)
   CHECK (XtIsManaged (quit) && quit->core.managed);
   CHECK (bh > 10 && qw > 10);
 
+  /* Xt's default colours are the desktop's: Command's foreground and
+   * background differ (black on the window colour, or light on dark) */
+  Pixel fg = 0, bg = 0, conv_fg = 1;
+  XtVaGetValues (quit, XtNforeground, &fg, XtNbackground, &bg, NULL);
+  XrmValue from = { sizeof "XtDefaultForeground", (XPointer) "XtDefaultForeground" }, to = { sizeof conv_fg, (XPointer) &conv_fg };
+  CHECK (XtConvertAndStore (quit, XtRString, &from, XtRPixel, &to) && conv_fg == fg && fg != bg);
+
   /* the text widget's string comes from its source (get_values_hook) */
   char *s = NULL;
   XtVaGetValues (text, XtNstring, &s, NULL);

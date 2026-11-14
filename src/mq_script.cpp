@@ -16,6 +16,7 @@
  * Licensed under the LGPL 2.1 or later; see LICENSE.LGPL.
  */
 #include "private.h"
+#include <QInputMethodEvent>
 #include <cstdio>
 
 void mq_dump_widgets ();
@@ -135,6 +136,15 @@ static void run_step (QStringList &steps)
         QApplication::sendEvent (t, &press);
         QApplication::sendEvent (t, &release);
       }
+    } else if (cmd == "preedit" || cmd == "commit") {
+      /* what an input method sends: pre-edit text, or committed text */
+      QWidget *t = find_widget (a.value (0));
+      if (!t) { fprintf (stderr, "script: no widget for: %s\n", qPrintable (step)); continue; }
+      t->setFocus ();
+      QString text = step.section (' ', 2);
+      QInputMethodEvent e (cmd == "preedit" ? text : QString (), {});
+      if (cmd == "commit") e.setCommitString (text);
+      QApplication::sendEvent (t, &e);
     } else if (cmd == "shot") {
       mq_save_windows (a.value (0));
     } else if (cmd == "dump") {

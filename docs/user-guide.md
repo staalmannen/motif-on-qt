@@ -109,6 +109,10 @@ Notebook, TabStack, Column ...), PseudoColor colormap tricks.
 
 Environment variables, all optional:
 
+- `MOTIFQT_DESKTOP_FONT=1`: Athena and plain Xt programs use the desktop's
+  font where they ask for `XtDefaultFont` (X's `fixed` otherwise). Their
+  default colours follow the desktop's palette in any case, dark themes
+  included.
 - `MOTIFQT_DUMP=1` with `MOTIFQT_AUTOQUIT=<ms>`: print the widget tree.
 - `MOTIFQT_SCREENSHOT=<file.png>` with `MOTIFQT_AUTOQUIT`: save the windows.
 - `MOTIFQT_SCRIPT="..."`: drive the program (see testing.md).

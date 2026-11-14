@@ -74,6 +74,7 @@ static bool display_available ()
 }
 
 static QHash<WidgetClass, MqClass *> &class_registry ();
+static Widget shell_child (Widget shell);
 
 void mq_ensure_app (int *argc, char **argv)
 {
@@ -637,7 +638,7 @@ void mq_popup_shell (Widget shell, bool up)
     if (R (shell)->popped_up && win->isVisible ()) { win->raise (); return; }
     R (shell)->popped_up = true;
     if (mq_is (shell, xmDialogShellWidgetClass)) {
-      Widget box = R (shell)->children.isEmpty () ? nullptr : R (shell)->children.first ();
+      Widget box = shell_child (shell);
       unsigned char style = box && mq_find_res (box, XmNdialogStyle) ? (unsigned char) mq_geti (box, XmNdialogStyle) : XmDIALOG_MODELESS;
       win->setWindowModality (style == XmDIALOG_FULL_APPLICATION_MODAL || style == XmDIALOG_PRIMARY_APPLICATION_MODAL ||
                               style == XmDIALOG_APPLICATION_MODAL || style == XmDIALOG_SYSTEM_MODAL ? Qt::ApplicationModal : Qt::NonModal);
@@ -658,8 +659,8 @@ void mq_popup_shell (Widget shell, bool up)
     win->show ();
     win->raise ();
     /* XmNinitialFocus of the dialog's manager */
-    if (!R (shell)->children.isEmpty () && mq_find_res (R (shell)->children.first (), XmNinitialFocus))
-      if (Widget f = (Widget) mq_get (R (shell)->children.first (), XmNinitialFocus))
+    if (shell_child (shell) && mq_find_res (shell_child (shell), XmNinitialFocus))
+      if (Widget f = (Widget) mq_get (shell_child (shell), XmNinitialFocus))
         if (QWidget *fq = mq_qw (f)) fq->setFocus (Qt::OtherFocusReason);
     mq_call (shell, XmNpopupCallback, nullptr);
   } else {
@@ -752,6 +753,29 @@ static void apply_args (Widget w, ArgList args, Cardinal n, bool initial)
   mq_foreign_set_values_end (w, snap, args, n);
 }
 
+/* Athena's VendorShell extension (src/xaw/Vendor.c): its input method
+ * support hangs off every vendor shell. Weak: only programs that use the
+ * Athena text widgets link it in */
+extern "C" {
+extern WidgetClass xawvendorShellExtWidgetClass __attribute__ ((weak));
+void _XawImRealize (Widget) __attribute__ ((weak));
+}
+
+static bool is_vendor_shell (MqClass *k)
+{
+  for (; k; k = k->superclass)
+    if (!strcmp (k->class_name, "VendorShell")) return true;
+  return false;
+}
+
+/* a shell's widget child (not an extension object such as Athena's) */
+static Widget shell_child (Widget shell)
+{
+  for (Widget c : R (shell)->children)
+    if (R (c)->klass->kind & (K_WIDGET | K_GADGET)) return c;
+  return nullptr;
+}
+
 static Widget create_widget (const char *name, WidgetClass xt_class, Widget parent, ArgList args, Cardinal n, bool popup,
                              const QList<TypedArg> &typed = {})
 {
@@ -816,6 +840,8 @@ static Widget create_widget (const char *name, WidgetClass xt_class, Widget pare
   mq_sync_children (w);
   if (klass->foreign) mq_foreign_initialize (w, args, n);
   if (parent && !popup && R (parent)->klass->foreign) mq_foreign_constraint_initialize (w, args, n);
+  if ((klass->kind & K_SHELL) && is_vendor_shell (klass) && &xawvendorShellExtWidgetClass && xawvendorShellExtWidgetClass)
+    XtCreateWidget ("shellext", xawvendorShellExtWidgetClass, w, nullptr, 0);
   return w;
 }
 
@@ -1041,6 +1067,8 @@ static void realize_rec (Widget w)
       }
   }
   for (Widget c : R (w)->children) realize_rec (c);
+  /* Athena's input method contexts, as its VendorShell realize makes them */
+  if ((R (w)->klass->kind & K_SHELL) && is_vendor_shell (R (w)->klass) && _XawImRealize) _XawImRealize (w);
 }
 
 void XtRealizeWidget (Widget w)
@@ -1584,6 +1612,17 @@ void _XtCopyToArg (char *src, XtArgVal *dst, unsigned int size)
     else if (size == sizeof (char)) *dst = (XtArgVal) *(char *) src;
     else memcpy (dst, src, qMin ((size_t) size, sizeof (XtArgVal)));
   } else memmove ((char *) *dst, src, size);
+}
+
+/* the extension record of a type in a class record's chain (at byte_offset:
+ * core_class.extension, composite_class.extension ...), as libXt finds it */
+XtPointer XtGetClassExtension (WidgetClass wc, Cardinal byte_offset, XrmQuark type, long version, Cardinal record_size)
+{
+  if (!wc) return nullptr;
+  auto *ext = *(ObjectClassExtension *) ((char *) wc + byte_offset);
+  for (; ext; ext = (ObjectClassExtension) ext->next_extension)
+    if (ext->record_type == type && ext->version >= version && ext->record_size >= record_size) return ext;
+  return nullptr;
 }
 
 /* the Xt 1 interface: the result stays in static storage */

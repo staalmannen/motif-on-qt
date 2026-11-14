@@ -31,7 +31,8 @@ pixels stay on the root window).
 - `MOTIFQT_SCRIPT="wait 1500; click find; type text hello; key text Return;
   shot out.png; quit"` - steps: `wait <ms>`, `key [<widget>] <keys>`
   (QKeySequence syntax), `click <widget> [button] [x y]`,
-  `drag <widget> x1 y1 x2 y2`, `type <widget> <text>`, `shot <png>`, `dump`,
+  `drag <widget> x1 y1 x2 y2`, `type <widget> <text>`, `preedit <widget> <text>`
+  and `commit <widget> <text>` (input method events), `shot <png>`, `dump`,
   `quit`. Widgets are found by Motif name, optionally as a path (`a.b`).
 
 ctest runs the examples and `tests/` headless (`ctest --test-dir build`).

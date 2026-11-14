@@ -89,15 +89,32 @@ TrueColor. Showing, resizing and XClearArea produce Expose events.
 ## Athena, Xmu, Xpm
 
 `src/xaw/` and `src/xmu/` are the genuine libXaw 1.0.16 and libXmu 1.1.3
-sources (Vendor.c and Tip.c left out: Motif's VendorShell stays, and Athena
-tips become Qt tooltips in `xaw_tip.c`). Their classes are program-defined
+sources (Tip.c left out: Athena tips become Qt tooltips in `xaw_tip.c`;
+Vendor.c is built with its VendorShell class renamed, so Motif's VendorShell
+stays the real one, for the "shellext" object Athena's input method code
+hangs off each vendor shell - our Xt creates it with the shell and realizes
+it with the shell, through weak references, so Motif-only programs do not
+link Athena). Their classes are program-defined
 classes to our Xt (xt_foreign.cpp) and draw through our Xlib, so nothing in
 them is patched: what they need goes into Xt and Xlib, where Motif programs
 benefit too - `core.managed` set by XtManageChild, `get_values_hook`,
-`XMapSubwindows`, font sets (one QFont each), `_XtCopyFromArg`. There is no
-X input method: `XOpenIM` fails and libXaw falls back to `XLookupString`.
+`XMapSubwindows`, font sets (one QFont each), `_XtCopyFromArg`,
+`XtGetClassExtension`.
 `src/xpm.cpp` reads XPM data, buffers and files into pixmaps, XImages and
 XpmImage.
+
+## Input methods (xim.cpp)
+
+Program widgets (MqCanvas) set Qt::WA_InputMethodEnabled when they read
+keys (event handlers or translations with key events, drawing areas, XmIm
+registration, an input context's focus window). A QInputMethodEvent's
+commit string is sent back to the widget as one QKeyEvent per character
+(the keysym is the character's), so every X way of reading keys sees it.
+The pre-edit string is shown in a ToolTip-flagged QLabel at the spot; the
+spot (XNSpotLocation, XmNspotLocation) answers Qt::ImCursorRectangle.
+XOpenIM/XCreateIC/XGetIMValues/XGetICValues answer as an X input method
+server offering over-the-spot and root styles; XFilterEvent is always
+False, since Qt filters keys before they reach us.
 
 ## Converters and class bits
 
@@ -116,6 +133,18 @@ by `mq_mb_decode`: valid UTF-8 is UTF-8; otherwise a non-Latin-1 8-bit
 locale codeset if there is one, else valid UTF-8 sequences as UTF-8 and the
 other bytes as Latin-1 (programs join strings of both kinds). `mq_mb_encode` writes back UTF-8 under a
 UTF-8 locale and Latin-1 when the text fits, so Latin-1 round-trips.
+
+## HiDPI
+
+A window's backing image has its widget's device pixel ratio (QImage
+devicePixelRatio), so QPainter scales the X (logical) coordinates; the
+paint event copies the device pixels of the exposed area. XCopyArea copies
+at the source's resolution and lets QPainter convert; XGetImage and
+XCopyPlane read X pixels (scaled down). Pixmaps stay 1:1. X's thin lines
+are one X pixel wide (a 1-unit pen, not a cosmetic one) and strokes of odd
+width are shifted by half a pixel, so a line covers the pixels X says it
+does (programs erase lines by clearing those pixels). At ratio 1 every path
+is the one used before, and output is byte-identical.
 
 ## Events
 

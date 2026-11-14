@@ -297,7 +297,11 @@ protected:
       img = mq_window_image (win, true);
     }
     QPainter p (this);
-    if (img) p.drawImage (pe->rect (), *img, pe->rect ());
+    if (img) {
+      qreal d = img->devicePixelRatio ();
+      QRectF src (pe->rect ().x () * d, pe->rect ().y () * d, pe->rect ().width () * d, pe->rect ().height () * d);
+      p.drawImage (QRectF (pe->rect ()), *img, src);
+    }
     else p.fillRect (pe->rect (), palette ().color (QPalette::Window));
     paint_extra (p);
   }
@@ -315,12 +319,22 @@ protected:
   void mouseReleaseEvent (QMouseEvent *e) override { input (e); }
   void keyPressEvent (QKeyEvent *e) override { input (e); }
   void keyReleaseEvent (QKeyEvent *e) override { input (e); }
+  /* input methods: committed text arrives as key presses (xim.cpp) */
+  void inputMethodEvent (QInputMethodEvent *e) override { mq_im_event (this, e); }
+  QVariant inputMethodQuery (Qt::InputMethodQuery q) const override
+  {
+    QVariant v;
+    return mq_im_query (const_cast<MqCanvas *> (this), q, &v) ? v : QWidget::inputMethodQuery (q);
+  }
 };
 
 QObject *mq_canvas_create (Widget w)
 {
   auto *c = new MqCanvas (w);
-  if (mq_has_callbacks (w, XmNinputCallback) || mq_class_is (w, "XmDrawingArea")) c->setFocusPolicy (Qt::ClickFocus);
+  if (mq_has_callbacks (w, XmNinputCallback) || mq_class_is (w, "XmDrawingArea")) {
+    c->setFocusPolicy (Qt::ClickFocus);
+    mq_im_enable (c);   /* dead keys, compose and input methods type into it */
+  }
   return c;
 }
 

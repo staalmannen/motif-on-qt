@@ -802,10 +802,6 @@ void XmeFromHorizontalPixels (Widget, int, XtArgVal *) {}
 void XmeFromVerticalPixels (Widget, int, XtArgVal *) {}
 
 /* ---- input methods: Qt delivers composed text with the key events ---- */
-void XmImRegister (Widget, unsigned int) {}
-void XmImUnregister (Widget) {}
-void XmImVaSetValues (Widget, ...) {}
-void XmImVaSetFocusValues (Widget, ...) {}
 int XmImMbLookupString (Widget, XKeyPressedEvent *event, char *buf, int nbytes, KeySym *keysym, int *status)
 {
   KeySym k = NoSymbol;

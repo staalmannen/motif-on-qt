@@ -30,6 +30,10 @@ motif_program (autopopups autopopups.c)
 motif_program (formchain ${CMAKE_SOURCE_DIR}/tests/formchain.c)
 motif_program (athena ${CMAKE_SOURCE_DIR}/tests/athena.c)
 target_link_libraries (athena PRIVATE Xaw7 Xmu Xpm)
+motif_program (inputmethod ${CMAKE_SOURCE_DIR}/tests/inputmethod.c)
+target_link_libraries (inputmethod PRIVATE Xaw7 Xmu)
+# its own check exits at 1.5 s, after the scripted commits
+set_tests_properties (inputmethod PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;MOTIFQT_AUTOQUIT=10000")
 
 # The headers compile as C++17 (C++ Motif programs such as xpdf)
 add_executable (cxx-headers ${CMAKE_SOURCE_DIR}/tests/cxx-headers.cpp)

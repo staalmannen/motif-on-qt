@@ -82,8 +82,23 @@ Command, Panner and AsciiText with real libXaw on X11 (left) and on Qt
 | --- | --- |
 | ![](docs/screenshots/athena-xaw.png) | ![](docs/screenshots/athena-qt.png) |
 
-Tooltips (`XtNtip`) are Qt tooltips. There is no X input method; the
-Athena text widget takes its input from `XLookupString`.
+Tooltips (`XtNtip`) are Qt tooltips.
+
+## Input methods
+
+Program widgets (drawing areas, Athena widgets, a program's own text
+widget) take part in Qt's input method: dead keys, compose, ibus, fcitx.
+Committed text reaches the program as key presses, one per character, so
+`XLookupString`, `XmbLookupString`/`Xutf8LookupString`/`XwcLookupString`
+and translation tables see it, with or without an input context.
+`XOpenIM`/`XCreateIC` and Motif's `XmIm` functions work and offer the over
+the spot style: the candidate window opens at the spot the program gives
+(`XNSpotLocation`, `XmNspotLocation`), and the pre-edit text shows in a
+small popup there, as an X input method server draws it. Athena's
+international text widget, for example, with text committed by an input
+method:
+
+![](docs/screenshots/athena-im-qt.png)
 
 ## How it works
 
@@ -159,6 +174,10 @@ distribution packages.
 
 ## Environment variables
 
+* `MOTIFQT_DESKTOP_FONT=1` makes `XtDefaultFont` (the font of Athena and
+  plain Xt programs that set none) the desktop's font instead of X's
+  `fixed`. Xt's default colours (`XtDefaultBackground`,
+  `XtDefaultForeground`) always follow the desktop's palette.
 * `QT_QPA_PLATFORM=offscreen` runs without a display, which is useful for tests.
 * `MOTIFQT_AUTOQUIT=<ms>` exits the program after that many milliseconds.
 * `MOTIFQT_SCREENSHOT=<file.png>` saves the top-level windows just before
@@ -167,8 +186,20 @@ distribution packages.
   at the autoquit exit.
 * `MOTIFQT_SCRIPT="wait 500; key n; click quit"` drives a program
   headlessly. The steps are `wait <ms>`, `key [<widget>] <keys>`,
-  `click <widget> [button]`, `type <widget> <text>`, `shot <file.png>`,
+  `click <widget> [button]`, `type <widget> <text>`, `preedit` and
+  `commit <widget> <text>` (input method text), `shot <file.png>`,
   `dump` and `quit`, where `<widget>` is a Motif widget name.
+
+## HiDPI
+
+On a screen with a device pixel ratio above 1 (or with `QT_SCALE_FACTOR`),
+windows keep their backing images at the screen's resolution: what programs
+draw with Xlib - text, lines, NEdit's editor, DDD's data displays - is
+sharp, while programs still work in X pixels. Pixmaps stay 1:1 (programs
+read and write their pixels) and are scaled when drawn. DDD's data display
+at scale 2, before (left) and after:
+
+![](docs/screenshots/hidpi-ddd.png)
 
 ## Running on X11
 
@@ -201,7 +232,9 @@ are not its own to the system libX11 instead.)
 * **Xlib:** display and screen queries, windows, atoms and properties,
   colours (X colour names, `rgb:` and `#` specs), GCs and all drawing calls,
   pixmaps, bitmaps, XImages in every format and depth, fonts and font sets,
-  cursors, keysyms, `XLookupString`, cut buffer 0, and shaped windows. Text
+  cursors, keysyms (any character, Unicode keysyms included),
+  `XLookupString` and the Xmb/Xutf8/Xwc lookups, input methods (XIM/XIC),
+  cut buffer 0, and shaped windows. Text
   in the locale's encoding: bytes that are not valid UTF-8 are read as
   Latin-1, as old programs write them.
 * **Athena (Xaw 1.0.16, all widgets), Xmu 1.1.3, Xpm** (pixmaps, XImages,

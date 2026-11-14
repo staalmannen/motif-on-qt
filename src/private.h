@@ -307,10 +307,17 @@ bool mq_program_convert (Widget w, const char *from_type, XrmValue *from, const 
 QString mq_mb_decode (const char *s, int len = -1);
 QByteArray mq_mb_encode (const QString &s);
 QString mq_decode_mixed (const QByteArray &b);
+/* the font XtDefaultFont names (xt_resources.cpp) */
+QByteArray mq_default_font_name ();
 /* the character a keysym types (0 if none), and with the modifiers of an
  * event applied (Control) (xlib.cpp) */
 uint mq_keysym_ucs (KeySym k);
 uint mq_keysym_text (KeySym k, unsigned state);
+/* input methods for program widgets (xim.cpp) */
+class QInputMethodEvent;
+bool mq_im_query (QWidget *qw, Qt::InputMethodQuery q, QVariant *out);
+void mq_im_event (QWidget *qw, QInputMethodEvent *e);
+void mq_im_enable (QWidget *qw);
 
 /* Xlib side (xlib.cpp) */
 QFont mq_font_from_xlfd (const QString &name, bool *ok);
