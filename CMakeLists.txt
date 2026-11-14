@@ -31,7 +31,20 @@ set (MQ_SOURCES
   src/xm_records.c
   src/xt_selection.cpp
   src/mq_script.cpp
-  src/xt_foreign.cpp)
+  src/xt_foreign.cpp
+  src/xpm.cpp)
+
+# Xmu and the Athena widgets: the genuine MIT sources of libXmu 1.1.3 and
+# libXaw 1.0.16, running on our Xt like a program's own widget classes
+file (GLOB MQ_XMU_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/xmu/*.c)
+# all of libXaw but Vendor.c (Motif's vendor shell stays) and Tip.c (tips
+# are Qt tooltips, src/xaw/xaw_tip.c)
+file (GLOB MQ_XAW_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/xaw/*.c)
+set_source_files_properties (${MQ_XMU_SOURCES} PROPERTIES
+  INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/src/xmu;${CMAKE_CURRENT_SOURCE_DIR}/include/X11/Xmu" COMPILE_OPTIONS "-w;-DHAVE_CONFIG_H")
+set_source_files_properties (${MQ_XAW_SOURCES} PROPERTIES
+  INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/src/xaw COMPILE_OPTIONS "-w;-DHAVE_CONFIG_H")
+list (APPEND MQ_SOURCES ${MQ_XMU_SOURCES} ${MQ_XAW_SOURCES})
 set (MQ_WARNINGS -Wall -Wno-unused-parameter $<$<COMPILE_LANGUAGE:CXX>:-Wno-register> -Wno-misleading-indentation $<$<COMPILE_LANGUAGE:CXX>:-Wno-write-strings> -Wno-deprecated-declarations)
 
 # The library is static: programs resolve every X/Xt/Motif symbol when they
@@ -65,7 +78,7 @@ endif ()
 # scripts that pull in the archive and its Qt dependencies, so Makefiles that
 # say -lXm -lXt -lX11 work unchanged with -L<libdir>. pkg-config files for
 # x11, xt and friends point configure scripts at the same place.
-set (MQ_LINK_NAMES Xm Xt X11 Xext Xmu Xpm ICE SM Mrm)
+set (MQ_LINK_NAMES Xm Xt X11 Xext Xmu Xmuu Xpm Xaw Xaw7 ICE SM Mrm)
 include (GNUInstallDirs)
 set (MQ_INSTALL_LIBDIR ${CMAKE_INSTALL_FULL_LIBDIR}/motif-on-qt)
 set (MQ_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_FULL_INCLUDEDIR}/motif-on-qt)
@@ -91,8 +104,9 @@ INPUT ( ${qtlibs} ${MQ_CXX_RUNTIME} -lm -ldl )
 ")
 endfunction ()
 function (mq_pc_files dir libdir includedir)
-  foreach (pc "x11|X11|1.8.7|-lX11" "xt|Xt|1.3.0|-lXt -lX11" "xext|Xext|1.3.6|-lXext" "xmu|Xmu|1.1.3|-lXmu"
-               "xpm|Xpm|3.5.17|-lXpm" "ice|ICE|1.0.10|-lICE" "sm|SM|1.2.3|-lSM" "motif|Motif|2.3.8|-lXm -lXt -lX11"
+  foreach (pc "x11|X11|1.8.7|-lX11" "xt|Xt|1.3.0|-lXt -lX11" "xext|Xext|1.3.6|-lXext" "xmu|Xmu|1.1.3|-lXmu -lXt -lX11"
+               "xpm|Xpm|3.5.20|-lXpm" "xaw7|Xaw|1.0.16|-lXaw7 -lXmu -lXt -lX11"
+               "xmuu|Xmuu|1.1.3|-lXmuu" "ice|ICE|1.0.10|-lICE" "sm|SM|1.2.3|-lSM" "motif|Motif|2.3.8|-lXm -lXt -lX11"
                "motif-on-qt|Motif on Qt|${PROJECT_VERSION}|-lXm -lXt -lX11")
     string (REPLACE "|" ";" f "${pc}")
     list (GET f 0 name)

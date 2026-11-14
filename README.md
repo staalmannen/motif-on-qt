@@ -1,8 +1,10 @@
 # Motif on Qt
 
-Compile old Motif programs, unmodified, against Qt 6. No X server, no libXm
-and no libXt are needed at run time: the Xt/Motif C API, and the part of Xlib
-Motif programs use, are implemented on Qt widgets. Programs run on any Qt
+Compile old Motif and Athena (Xaw) programs, unmodified, against Qt 6. No X
+server, no libXm, libXaw or libXt are needed at run time: the Xt/Motif C API,
+and the part of Xlib these programs use, are implemented on Qt. The Athena
+widgets, Xmu and the Xpm API come along, so programs that mix Motif with
+Athena widgets (DDD) or use Athena alone build too. Programs run on any Qt
 platform: Wayland, X11, Windows or macOS, or headless with `offscreen`.
 
 | Motif 2.3.8 on X11 | the same source on Qt 6 |
@@ -51,6 +53,38 @@ BubbleButton tabs, which subclasses XmPushButton:
 
 ![](docs/screenshots/nedit-open-qt.png)
 
+## DDD
+
+DDD 3.4.1, the graphical debugger front end, built with its own
+`./configure && make`. It mixes Motif with Athena widgets: the data display
+is a graph editor inside an Athena Porthole with a Panner. A session with a
+breakpoint, the execution arrow and a data display:
+
+![](docs/screenshots/ddd-qt.png)
+
+DDD with real Motif and libXaw on X11, for comparison:
+
+![](docs/screenshots/ddd-motif.png)
+
+DDD registers its own resource converters (`@bf` font changes in its
+strings, its pixmap search path) and tests classes with the `XmIsXxx`
+macros of `XmP.h`; both work as with libXt and libXm.
+
+## Athena widgets
+
+The Athena widgets are libXaw 1.0.16's own sources, unmodified, running on
+our Xt and drawing through our Xlib, so they look like Athena. Programs link
+them with `-lXaw7` (or `-lXaw`, pkg-config `xaw7`), as with real X. Box,
+Command, Panner and AsciiText with real libXaw on X11 (left) and on Qt
+(right):
+
+| libXaw on X11 | the same source on Qt |
+| --- | --- |
+| ![](docs/screenshots/athena-xaw.png) | ![](docs/screenshots/athena-qt.png) |
+
+Tooltips (`XtNtip`) are Qt tooltips. There is no X input method; the
+Athena text widget takes its input from `XLookupString`.
+
 ## How it works
 
 * **The genuine headers.** `include/` holds the real public X11, Xt and
@@ -79,6 +113,9 @@ BubbleButton tabs, which subclasses XmPushButton:
   their own widget classes: those are driven through their class methods
   (initialize, expose, resize, set_values, geometry_manager, change_managed,
   constraint methods, actions and translations) the way libXt drives them.
+* **Athena, Xmu and Xpm.** The genuine libXaw and libXmu sources (MIT) are
+  built into the library and run on our Xt like a program's own widget
+  classes; the Xpm API is our own reader of the XPM format.
 * **Events and the main loop.** `XtAppMainLoop` runs the Qt event loop.
   Qt input becomes XEvents for event handlers, translation tables and
   actions. Timeouts, work procs and input sources map onto QTimer and
@@ -163,8 +200,12 @@ are not its own to the system libX11 instead.)
   `XmGetColors`, traversal, the clipboard, unit conversion, tool tips.
 * **Xlib:** display and screen queries, windows, atoms and properties,
   colours (X colour names, `rgb:` and `#` specs), GCs and all drawing calls,
-  pixmaps, bitmaps, XImages, fonts, cursors, keysyms, `XLookupString`, and
-  shaped windows.
+  pixmaps, bitmaps, XImages in every format and depth, fonts and font sets,
+  cursors, keysyms, `XLookupString`, cut buffer 0, and shaped windows. Text
+  in the locale's encoding: bytes that are not valid UTF-8 are read as
+  Latin-1, as old programs write them.
+* **Athena (Xaw 1.0.16, all widgets), Xmu 1.1.3, Xpm** (pixmaps, XImages,
+  XpmImage, files, buffers, colour symbols).
 
 ## Not supported
 
@@ -184,7 +225,9 @@ are not its own to the system libX11 instead.)
 
 LGPL 2.1 or later (`LICENSE.LGPL`), like Motif. The vendored Motif headers
 and the example programs are from Motif 2.3.8 (LGPL 2.1); the X11 and Xt
-headers are under the MIT licence.
+headers, and the libXaw (`src/xaw/`), libXmu (`src/xmu/`) and libXpm
+(`X11/xpm.h`) code, are under the MIT licence (their COPYING files are next
+to them).
 
 This repository used to hold the Qt Solutions "Qt/Motif extension", which
 let Qt and real Motif share one X11 application. That code needed Motif and

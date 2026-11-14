@@ -116,6 +116,7 @@ MqClass *mq_foreign_class (WidgetClass c)
     for (Cardinal i = 0; i < k.num_resources; i++) info.constraints << ForeignRes { &k.resources[i] };
   }
   foreign_info ().insert (mc, info);
+  mq_motif_class_extension (c);   /* before class_part_initialize, which may add its own bit */
   if (c->core_class.class_initialize && !(c->core_class.class_inited & 0x100)) c->core_class.class_initialize ();
   for (WidgetClass k : info.chain)
     if (k->core_class.class_part_initialize) k->core_class.class_part_initialize (c);
@@ -263,6 +264,16 @@ bool mq_foreign_fetch (Widget w, const char *name, XtArgVal dest)
   if (!r || !src) return false;
   if (dest) memcpy ((void *) dest, src, r->resource_size);
   return true;
+}
+
+/* after the resources: the classes' get_values_hooks, superclass first
+ * (Athena's text widgets answer XtNstring from their source object) */
+void mq_foreign_get_values_hook (Widget w, ArgList args, Cardinal n)
+{
+  const ForeignInfo *fi = info_of (w);
+  if (!fi) return;
+  for (WidgetClass k : fi->chain)
+    if (k->core_class.get_values_hook) k->core_class.get_values_hook (w, args, &n);
 }
 
 void mq_foreign_callbacks_changed (Widget w, const char *name)
@@ -515,7 +526,10 @@ static void foreign_place (Widget parent, Widget child)
   QWidget *cw = mq_qw (child), *pw = mq_qw (parent);
   if (cw && pw) {
     if (R (child)->klass->kind & K_GADGET) cw->setAttribute (Qt::WA_DontShowOnScreen);   /* drawn by the parent's expose */
-    else if (cw->parentWidget () != pw) cw->setParent (pw);
+    else if (cw->parentWidget () != pw) {
+      cw->setParent (pw);
+      mq_sync_visible (child);   /* managed before it had a parent: show it now */
+    }
     cw->setGeometry (child->core.x, child->core.y, qMax<int> (1, child->core.width), qMax<int> (1, child->core.height));
   }
   if (R (parent)->realized) mq_foreign_change_managed (parent);

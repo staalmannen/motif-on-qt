@@ -108,10 +108,7 @@ static QString decode (const QByteArray &b, unsigned char type = XmSTRING_COMPON
     for (int i = 0; i < (int) (b.size () / sizeof (wchar_t)); i++) out += QString::fromWCharArray (&w[i], 1);
     return out;
   }
-  auto dec = QStringDecoder (QStringDecoder::Utf8, QStringDecoder::Flag::Stateless);
-  QString s = dec.decode (b);
-  if (dec.hasError ()) return QString::fromLatin1 (b);
-  return s;
+  return mq_mb_decode (b.constData (), b.size ());
 }
 
 static XmStr *make () { return new XmStr; }

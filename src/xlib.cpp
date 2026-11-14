@@ -18,6 +18,12 @@
 #include <QPainterPath>
 #include <QFontDatabase>
 #include <cstring>
+#include <cstdarg>
+#include <clocale>
+#include <langinfo.h>
+#include <strings.h>
+#include <QStringDecoder>
+#include <QStringEncoder>
 #include <cstdlib>
 #include <type_traits>
 #include <dlfcn.h>
@@ -116,8 +122,9 @@ static XID alloc_id () { return s_next_id++; }
 void mq_xlib_init ()
 {
   if (mq_display) return;
-  auto *d = new PrivDisplay;
-  memset (d, 0, sizeof (*d));
+  /* room for the whole struct _XDisplay of X11/Xlibint.h, zeroed: code
+   * built against Xlibint (Xmu, programs) may read its later fields */
+  auto *d = (PrivDisplay *) calloc (1, 8192);   /* sizeof (struct _XDisplay): 4720 on x86_64 */
   d->fd = -1;
   d->proto_major_version = 11;
   d->proto_minor_version = 0;
@@ -295,6 +302,8 @@ static Pixmap new_pixmap (const QImage &img, int depth)
 }
 
 Pixmap mq_pixmap_from_image (const QImage &img) { return new_pixmap (img.convertToFormat (QImage::Format_ARGB32), 24); }
+/* a depth-1 pixmap: white pixels are 1 */
+Pixmap mq_bitmap_from_image (const QImage &img) { return new_pixmap (img.convertToFormat (QImage::Format_RGB32), 1); }
 
 /* ======================================================================
  * Painting with a GC
@@ -769,7 +778,19 @@ int XMapWindow (Display * a0_, Window w)
 }
 
 int XMapRaised (Display *d, Window w) { MQ_FWD (XMapRaised, d, d, w); XMapWindow (d, w); if (QWidget *qw = window_widget (w)) qw->raise (); return 1; }
-int XMapSubwindows (Display * a0_, Window a1_) { MQ_FWD (XMapSubwindows, a0_, a0_, a1_); return 1; }
+/* the managed widgets among the children (Athena's Box unmaps them while
+ * it moves them, then maps them all again) */
+int XMapSubwindows (Display * a0_, Window w)
+{ MQ_FWD (XMapSubwindows, a0_, a0_, w);
+  QWidget *qw = window_widget (w);
+  if (!qw) return 1;
+  for (QObject *o : qw->children ()) {
+    QWidget *c = qobject_cast<QWidget *> (o);
+    if (!c || c->isWindow ()) continue;
+    if (Widget xw = mq_from_qobject (c)) { if (mq_qw (xw) == c && R (xw)->managed) mq_sync_visible (xw); }
+  }
+  return 1;
+}
 
 int XUnmapWindow (Display * a0_, Window w)
 { MQ_FWD (XUnmapWindow, a0_, a0_, w);
@@ -782,6 +803,31 @@ int XLowerWindow (Display * a0_, Window w) { MQ_FWD (XLowerWindow, a0_, a0_, w);
 int XIconifyWindow (Display * a0_, Window w, int a2_) { MQ_FWD (XIconifyWindow, a0_, a0_, w, a2_); if (QWidget *qw = window_widget (w)) qw->window ()->showMinimized (); return 1; }
 int XMoveWindow (Display * a0_, Window w, int x, int y) { MQ_FWD (XMoveWindow, a0_, a0_, w, x, y); if (QWidget *qw = window_widget (w)) qw->move (x, y); return 1; }
 int XResizeWindow (Display * a0_, Window w, unsigned int width, unsigned int height) { MQ_FWD (XResizeWindow, a0_, a0_, w, width, height); if (QWidget *qw = window_widget (w)) qw->resize (width, height); return 1; }
+int XConfigureWindow (Display * a0_, Window w, unsigned int mask, XWindowChanges *c)
+{ MQ_FWD (XConfigureWindow, a0_, a0_, w, mask, c);
+  QWidget *qw = window_widget (w);
+  if (!qw || !c) return 1;
+  QRect g = qw->geometry ();
+  if (mask & CWX) g.moveLeft (c->x);
+  if (mask & CWY) g.moveTop (c->y);
+  if (mask & CWWidth) g.setWidth (c->width);
+  if (mask & CWHeight) g.setHeight (c->height);
+  if (mask & (CWX | CWY | CWWidth | CWHeight)) qw->setGeometry (g);
+  if (mask & CWStackMode) { if (c->stack_mode == Above) qw->raise (); else if (c->stack_mode == Below) qw->lower (); }
+  return 1;
+}
+
+/* the window manager's job on X; here the window simply goes */
+Status XWithdrawWindow (Display *d, Window w, int screen)
+{ MQ_FWD (XWithdrawWindow, d, d, w, screen);
+  if (QWidget *qw = window_widget (w)) qw->window ()->hide ();
+  return 1;
+}
+
+/* windows of other programs cannot be adopted (DDD's "swallowing") */
+int XReparentWindow (Display * a0_, Window a1_, Window a2_, int a3_, int a4_)
+{ MQ_FWD (XReparentWindow, a0_, a0_, a1_, a2_, a3_, a4_); return 1; }
+
 int XMoveResizeWindow (Display * a0_, Window w, int x, int y, unsigned int width, unsigned int height)
 { MQ_FWD (XMoveResizeWindow, a0_, a0_, w, x, y, width, height);
   if (QWidget *qw = window_widget (w)) qw->setGeometry (x, y, width, height);
@@ -920,14 +966,14 @@ int XSelectInput (Display * a0_, Window w, long mask)
 
 int XStoreName (Display * a0_, Window w, _Xconst char *name)
 { MQ_FWD (XStoreName, a0_, a0_, w, name);
-  if (QWidget *qw = window_widget (w)) qw->window ()->setWindowTitle (QString::fromLocal8Bit (name));
+  if (QWidget *qw = window_widget (w)) qw->window ()->setWindowTitle (mq_mb_decode (name));
   return 1;
 }
 
 Status XFetchName (Display * a0_, Window w, char **name)
 { MQ_FWD (XFetchName, a0_, a0_, w, name);
   QWidget *qw = window_widget (w);
-  *name = qw ? strdup (qw->window ()->windowTitle ().toLocal8Bit ().constData ()) : nullptr;
+  *name = qw ? strdup (mq_mb_encode (qw->window ()->windowTitle ()).constData ()) : nullptr;
   return qw != nullptr;
 }
 
@@ -1023,7 +1069,37 @@ char *XSetLocaleModifiers (_Xconst char *) { return (char *) ""; }
 XSizeHints *XAllocSizeHints (void) { return (XSizeHints *) calloc (1, sizeof (XSizeHints)); }
 XWMHints *XAllocWMHints (void) { return (XWMHints *) calloc (1, sizeof (XWMHints)); }
 XClassHint *XAllocClassHint (void) { return (XClassHint *) calloc (1, sizeof (XClassHint)); }
-int XSetClassHint (Display * a0_, Window a1_, XClassHint * a2_) { MQ_FWD (XSetClassHint, a0_, a0_, a1_, a2_); return 1; }
+static QHash<Window, QPair<QByteArray, QByteArray>> &class_hints ()
+{
+  static QHash<Window, QPair<QByteArray, QByteArray>> h;
+  return h;
+}
+
+int XSetClassHint (Display * a0_, Window w, XClassHint *hint)
+{ MQ_FWD (XSetClassHint, a0_, a0_, w, hint);
+  if (hint) class_hints ().insert (w, qMakePair (QByteArray (hint->res_name ? hint->res_name : ""), QByteArray (hint->res_class ? hint->res_class : "")));
+  return 1;
+}
+
+/* a window's class hint: the one set, or for a shell the application's
+ * name and class (what Xt sets on real X) */
+Status XGetClassHint (Display * a0_, Window w, XClassHint *hint)
+{ MQ_FWD (XGetClassHint, a0_, a0_, w, hint);
+  if (!hint) return 0;
+  auto it = class_hints ().constFind (w);
+  QByteArray name, klass;
+  if (it != class_hints ().constEnd ()) { name = it->first; klass = it->second; }
+  else if (Widget wd = mq_widget_for_window (w); wd && (R (wd)->klass->kind & K_SHELL)) {
+    String n = nullptr, c = nullptr;
+    XtGetApplicationNameAndClass (XtDisplay (wd), &n, &c);
+    name = n ? n : ""; klass = c ? c : "";
+  } else return 0;
+  hint->res_name = (char *) malloc (name.size () + 1);
+  memcpy (hint->res_name, name.constData (), name.size () + 1);
+  hint->res_class = (char *) malloc (klass.size () + 1);
+  memcpy (hint->res_class, klass.constData (), klass.size () + 1);
+  return 1;
+}
 
 int XChangeProperty (Display * a0_, Window w, Atom property, Atom a3_, int format, int mode, _Xconst unsigned char *data, int n)
 { MQ_FWD (XChangeProperty, a0_, a0_, w, property, a3_, format, mode, data, n);
@@ -1482,10 +1558,111 @@ int XReadBitmapFile (Display * a0_, Drawable a1_, _Xconst char *filename, unsign
   return BitmapSuccess;
 }
 
-/* XImage: 32 bits per pixel, ZPixmap */
-static unsigned long img_get_pixel (XImage *im, int x, int y) { return ((uint32_t *) (im->data + y * im->bytes_per_line))[x] & 0xffffff; }
-static int img_put_pixel (XImage *im, int x, int y, unsigned long p) { ((uint32_t *) (im->data + y * im->bytes_per_line))[x] = p; return 1; }
-static int img_destroy (XImage *im) { free (im->data); free (im); return 1; }
+/* ---------- XImage ----------
+ * Images keep the layout their creator gives them (programs build XYBitmap
+ * images by hand and call XInitImage): XYBitmap / XYPixmap and ZPixmap with
+ * 1, 4, 8, 16, 24 or 32 bits per pixel, either bit and byte order. Our own
+ * images (XGetImage, XCreateImage of depth 24) are 32-bit ZPixmap. */
+static unsigned long unit_read (const unsigned char *p, int bytes, int order)
+{
+  unsigned long v = 0;
+  for (int i = 0; i < bytes; i++) v |= (unsigned long) p[order == LSBFirst ? i : bytes - 1 - i] << (8 * i);
+  return v;
+}
+static void unit_write (unsigned char *p, int bytes, int order, unsigned long v)
+{
+  for (int i = 0; i < bytes; i++) p[order == LSBFirst ? i : bytes - 1 - i] = (v >> (8 * i)) & 0xff;
+}
+
+/* the address of the bitmap unit holding bit x of row y, and the bit in it */
+static unsigned char *bit_unit (XImage *im, int x, int y, int *bit, int *bytes)
+{
+  int unit = im->bitmap_unit == 16 || im->bitmap_unit == 32 ? im->bitmap_unit : 8;
+  int bx = x + im->xoffset;
+  *bytes = unit / 8;
+  int in = bx % unit;
+  *bit = im->bitmap_bit_order == LSBFirst ? in : unit - 1 - in;
+  return (unsigned char *) im->data + y * im->bytes_per_line + (bx / unit) * (*bytes);
+}
+
+static unsigned long img_get_pixel (XImage *im, int x, int y)
+{
+  if (im->format != ZPixmap || im->bits_per_pixel == 1) {
+    int bit, bytes;
+    unsigned char *u = bit_unit (im, x, y, &bit, &bytes);
+    return (unit_read (u, bytes, im->byte_order) >> bit) & 1;
+  }
+  unsigned char *row = (unsigned char *) im->data + y * im->bytes_per_line;
+  switch (im->bits_per_pixel) {
+  case 4: { unsigned char b = row[x / 2]; return (x & 1) ? (b >> 4) : (b & 0xf); }
+  case 8: return row[x];
+  case 16: return unit_read (row + 2 * x, 2, im->byte_order);
+  case 24: return unit_read (row + 3 * x, 3, im->byte_order);
+  default: return unit_read (row + 4 * x, 4, im->byte_order) & (im->depth >= 32 ? 0xffffffffUL : 0xffffffUL);
+  }
+}
+
+static int img_put_pixel (XImage *im, int x, int y, unsigned long p)
+{
+  if (im->format != ZPixmap || im->bits_per_pixel == 1) {
+    int bit, bytes;
+    unsigned char *u = bit_unit (im, x, y, &bit, &bytes);
+    unsigned long v = unit_read (u, bytes, im->byte_order);
+    v = (p & 1) ? v | (1UL << bit) : v & ~(1UL << bit);
+    unit_write (u, bytes, im->byte_order, v);
+    return 1;
+  }
+  unsigned char *row = (unsigned char *) im->data + y * im->bytes_per_line;
+  switch (im->bits_per_pixel) {
+  case 4: { unsigned char &b = row[x / 2]; b = (x & 1) ? ((b & 0x0f) | ((p & 0xf) << 4)) : ((b & 0xf0) | (p & 0xf)); break; }
+  case 8: row[x] = p; break;
+  case 16: unit_write (row + 2 * x, 2, im->byte_order, p); break;
+  case 24: unit_write (row + 3 * x, 3, im->byte_order, p); break;
+  default: unit_write (row + 4 * x, 4, im->byte_order, p); break;
+  }
+  return 1;
+}
+
+static int img_destroy (XImage *im) { free (im->data); free (im->obdata); free (im); return 1; }
+
+static int bytes_per_line_for (XImage *im)
+{
+  int pad = im->bitmap_pad > 0 ? im->bitmap_pad : 32;
+  long bits = im->format == ZPixmap ? (long) im->width * im->bits_per_pixel : (long) im->width + im->xoffset;
+  return (int) (((bits + pad - 1) / pad) * (pad / 8));
+}
+
+static XImage *img_sub_image (XImage *im, int x, int y, unsigned int w, unsigned int h);
+static int img_add_pixel (XImage *im, long value)
+{
+  if (im->format != ZPixmap || im->bits_per_pixel == 1) return 0;
+  for (int y = 0; y < im->height; y++)
+    for (int x = 0; x < im->width; x++) img_put_pixel (im, x, y, img_get_pixel (im, x, y) + value);
+  return 0;
+}
+
+static void init_image_funcs (XImage *im)
+{
+  im->f.get_pixel = img_get_pixel;
+  im->f.put_pixel = img_put_pixel;
+  im->f.destroy_image = img_destroy;
+  im->f.sub_image = img_sub_image;
+  im->f.add_pixel = img_add_pixel;
+}
+
+static XImage *img_sub_image (XImage *im, int x, int y, unsigned int w, unsigned int h)
+{
+  auto *sub = (XImage *) calloc (1, sizeof (XImage));
+  *sub = *im;
+  sub->width = w; sub->height = h; sub->xoffset = 0; sub->obdata = nullptr;
+  sub->bytes_per_line = bytes_per_line_for (sub);
+  sub->data = (char *) calloc (1, (size_t) sub->bytes_per_line * h + 1);
+  init_image_funcs (sub);
+  for (unsigned r = 0; r < h && y + (int) r < im->height; r++)
+    for (unsigned c = 0; c < w && x + (int) c < im->width; c++)
+      img_put_pixel (sub, c, r, img_get_pixel (im, x + c, y + r));
+  return sub;
+}
 
 static XImage *make_ximage (int w, int h, char *data)
 {
@@ -1494,15 +1671,33 @@ static XImage *make_ximage (int w, int h, char *data)
   im->byte_order = LSBFirst; im->bitmap_unit = 32; im->bitmap_bit_order = LSBFirst; im->bitmap_pad = 32;
   im->depth = 24; im->bytes_per_line = w * 4; im->bits_per_pixel = 32;
   im->red_mask = 0xff0000; im->green_mask = 0xff00; im->blue_mask = 0xff;
-  im->f.get_pixel = img_get_pixel;
-  im->f.put_pixel = img_put_pixel;
-  im->f.destroy_image = img_destroy;
+  init_image_funcs (im);
   return im;
 }
 
-XImage *XCreateImage (Display * a0_, Visual * a1_, unsigned int a2_, int a3_, int a4_, char *data, unsigned int w, unsigned int h, int a8_, int a9_)
-{ MQ_FWD (XCreateImage, a0_, a0_, a1_, a2_, a3_, a4_, data, w, h, a8_, a9_);
-  return make_ximage (w, h, data);
+XImage *XCreateImage (Display * a0_, Visual * a1_, unsigned int depth, int format, int offset, char *data, unsigned int w, unsigned int h, int pad, int bpl)
+{ MQ_FWD (XCreateImage, a0_, a0_, a1_, depth, format, offset, data, w, h, pad, bpl);
+  auto *im = (XImage *) calloc (1, sizeof (XImage));
+  im->width = w; im->height = h; im->format = format; im->xoffset = offset; im->data = data;
+  im->depth = depth;
+  im->byte_order = LSBFirst; im->bitmap_unit = 32; im->bitmap_bit_order = LSBFirst;
+  im->bitmap_pad = pad ? pad : 32;
+  im->bits_per_pixel = format != ZPixmap || depth == 1 ? 1 : depth <= 4 ? 4 : depth <= 8 ? 8 : depth <= 16 ? 16 : 32;
+  if (depth > 8) { im->red_mask = 0xff0000; im->green_mask = 0xff00; im->blue_mask = 0xff; }
+  im->bytes_per_line = bpl ? bpl : bytes_per_line_for (im);
+  init_image_funcs (im);
+  return im;
+}
+
+/* the image's fields are the caller's: only the functions are filled in */
+Status XInitImage (XImage *im)
+{
+  if (!im || im->width < 0 || im->height < 0 || im->xoffset < 0 || im->depth < 1 || im->depth > 32) return 0;
+  if (im->format != ZPixmap && im->format != XYBitmap && im->format != XYPixmap) return 0;
+  if (im->bitmap_pad != 8 && im->bitmap_pad != 16 && im->bitmap_pad != 32) return 0;
+  if (im->bytes_per_line == 0) im->bytes_per_line = bytes_per_line_for (im);
+  init_image_funcs (im);
+  return 1;
 }
 
 XImage *XGetImage (Display * a0_, Drawable d, int x, int y, unsigned int w, unsigned int h, unsigned long a6_, int a7_)
@@ -1518,8 +1713,14 @@ XImage *XGetImage (Display * a0_, Drawable d, int x, int y, unsigned int w, unsi
 int XPutImage (Display * a0_, Drawable d, GC gc, XImage *im, int sx, int sy, int dx, int dy, unsigned int w, unsigned int h)
 { MQ_FWD (XPutImage, a0_, a0_, d, gc, im, sx, sy, dx, dy, w, h);
   QImage img (w, h, QImage::Format_RGB32);
+  /* a bitmap is drawn in the GC's foreground (1) and background (0) */
+  bool bitmap = im->depth == 1 || im->format == XYBitmap;
+  QRgb fg = gc ? mq_color (gc->v.foreground).rgb () : 0xff000000, bg = gc ? mq_color (gc->v.background).rgb () : 0xffffffff;
   for (unsigned y = 0; y < h; y++)
-    for (unsigned x = 0; x < w; x++) img.setPixel (x, y, 0xff000000 | XGetPixel (im, sx + x, sy + y));
+    for (unsigned x = 0; x < w; x++) {
+      unsigned long p = XGetPixel (im, sx + x, sy + y);
+      img.setPixel (x, y, bitmap ? (p ? fg : bg) : 0xff000000 | p);
+    }
   GcPainter g (d, gc, true);
   if (g.ok) g.p.drawImage (dx, dy, img);
   return 1;
@@ -1807,4 +2008,389 @@ int XFindContext (Display *, XID rid, XContext ctx, XPointer *data)
 }
 int XDeleteContext (Display *, XID rid, XContext ctx) { return contexts ().remove ({ rid, ctx }) ? 0 : XCNOENT; }
 
+} /* extern "C" */
+
+/* ---------- cut buffer 0, error texts, display name ---------- */
+extern "C" {
+char *XFetchBytes (Display *d, int *nbytes)
+{ MQ_FWD (XFetchBytes, d, d, nbytes);
+  QByteArray t = mq_mb_encode (QGuiApplication::clipboard ()->text (QClipboard::Selection));
+  if (t.isEmpty ()) t = mq_mb_encode (QGuiApplication::clipboard ()->text ());
+  if (nbytes) *nbytes = t.size ();
+  if (t.isEmpty ()) return nullptr;
+  char *out = (char *) malloc (t.size () + 1);
+  memcpy (out, t.constData (), t.size () + 1);
+  return out;
+}
+
+int XStoreBytes (Display *d, _Xconst char *bytes, int nbytes)
+{ MQ_FWD (XStoreBytes, d, d, bytes, nbytes);
+  QString t = mq_mb_decode (bytes, nbytes);
+  if (QGuiApplication::clipboard ()->supportsSelection ()) QGuiApplication::clipboard ()->setText (t, QClipboard::Selection);
+  return 1;
+}
+
+int XGetErrorText (Display *d, int code, char *buf, int len)
+{ MQ_FWD (XGetErrorText, d, d, code, buf, len);
+  static const char *names[] = { "Success", "BadRequest", "BadValue", "BadWindow", "BadPixmap", "BadAtom", "BadCursor",
+                                 "BadFont", "BadMatch", "BadDrawable", "BadAccess", "BadAlloc", "BadColor", "BadGC",
+                                 "BadIDChoice", "BadName", "BadLength", "BadImplementation" };
+  if (buf && len > 0) {
+    if (code >= 0 && code < (int) (sizeof names / sizeof *names)) snprintf (buf, len, "%s", names[code]);
+    else snprintf (buf, len, "%d", code);
+  }
+  return 0;
+}
+
+int XGetErrorDatabaseText (Display *d, _Xconst char *name, _Xconst char *message, _Xconst char *def, char *buf, int len)
+{ MQ_FWD (XGetErrorDatabaseText, d, d, name, message, def, buf, len);
+  if (buf && len > 0) snprintf (buf, len, "%s", def ? def : "");
+  return 0;
+}
+
+char *XDisplayString (Display *d)
+{ MQ_FWD (XDisplayString, d, d);
+  static QByteArray name;
+  if (name.isEmpty ()) {
+    name = qgetenv ("DISPLAY");
+    if (name.isEmpty ()) name = ":qt";
+  }
+  return name.data ();
+}
+} /* extern "C" */
+
+/* ---------- the rest of what Xmu and the Athena widgets call ---------- */
+extern "C" {
+/* our display keeps no event queue (QLength is 0): nothing to peek at */
+int XPeekIfEvent (Display *d, XEvent *ev, Bool (*)(Display *, XEvent *, XPointer), XPointer)
+{ if (ev) memset (ev, 0, sizeof (*ev)); (void) d; return 0; }
+int XSetWindowBorderPixmap (Display * a0_, Window a1_, Pixmap a2_) { MQ_FWD (XSetWindowBorderPixmap, a0_, a0_, a1_, a2_); return 1; }
+int XRecolorCursor (Display * a0_, Cursor a1_, XColor *a2_, XColor *a3_) { MQ_FWD (XRecolorCursor, a0_, a0_, a1_, a2_, a3_); return 1; }
+/* no other clients to kill or to outlive */
+int XKillClient (Display * a0_, XID a1_) { MQ_FWD (XKillClient, a0_, a0_, a1_); return 1; }
+int XSetCloseDownMode (Display * a0_, int a1_) { MQ_FWD (XSetCloseDownMode, a0_, a0_, a1_); return 1; }
+/* standard colormaps: a TrueColor display has none to share */
+Status XGetRGBColormaps (Display * a0_, Window a1_, XStandardColormap **maps, int *count, Atom a4_)
+{ MQ_FWD (XGetRGBColormaps, a0_, a0_, a1_, maps, count, a4_); if (maps) *maps = nullptr; if (count) *count = 0; return 0; }
+void XSetRGBColormaps (Display * a0_, Window a1_, XStandardColormap *a2_, int a3_, Atom a4_)
+{ if (a0_ && a0_ != mq_display) { static auto real = (decltype (&XSetRGBColormaps)) mq_real_symbol ("XSetRGBColormaps"); if (real) real (a0_, a1_, a2_, a3_, a4_); } }
+XStandardColormap *XAllocStandardColormap (void) { return (XStandardColormap *) calloc (1, sizeof (XStandardColormap)); }
+/* extensions: their codes, no requests (CloseHook keeps its data there) */
+XExtCodes *XAddExtension (Display *) { static int next = 128; auto *c = (XExtCodes *) calloc (1, sizeof (XExtCodes)); c->extension = next++; return c; }
+typedef int (*CloseDisplayProc) (Display *, XExtCodes *);
+CloseDisplayProc XESetCloseDisplay (Display *, int, CloseDisplayProc) { return nullptr; }
+}
+
+extern "C" {
+/* the font's properties (XFontStruct.properties; ours carry few) */
+Bool XGetFontProperty (XFontStruct *fs, Atom atom, unsigned long *value)
+{
+  if (!fs) return False;
+  for (int i = 0; i < fs->n_properties; i++)
+    if (fs->properties[i].name == atom) { if (value) *value = fs->properties[i].card32; return True; }
+  return False;
+}
+
+/* an XBM file as XBM data: rows padded to bytes, least significant bit first */
+int XReadBitmapFileData (_Xconst char *filename, unsigned int *w, unsigned int *h, unsigned char **data, int *xh, int *yh)
+{
+  QImage img (QString::fromLocal8Bit (filename));
+  if (img.isNull ()) return BitmapOpenFailed;
+  int bpl = (img.width () + 7) / 8;
+  auto *bits = (unsigned char *) calloc (1, (size_t) bpl * img.height () + 1);
+  for (int y = 0; y < img.height (); y++)
+    for (int x = 0; x < img.width (); x++)
+      if (qGray (img.pixel (x, y)) < 128) bits[y * bpl + x / 8] |= 1 << (x % 8);
+  if (w) *w = img.width ();
+  if (h) *h = img.height ();
+  if (data) *data = bits; else free (bits);
+  if (xh) *xh = -1;
+  if (yh) *yh = -1;
+  return BitmapSuccess;
+}
+}
+
+/* ---------- locale text ---------- */
+static bool utf8_locale ()
+{
+  const char *cs = nl_langinfo (CODESET);
+  return cs && (!strcasecmp (cs, "UTF-8") || !strcasecmp (cs, "utf8"));
+}
+
+/* valid UTF-8 sequences as UTF-8, every other byte as Latin-1: programs
+ * join strings of both kinds (DDD: a Latin-1 copyright sign next to UTF-8
+ * names) */
+QString mq_decode_mixed (const QByteArray &b)
+{
+  QString out;
+  out.reserve (b.size ());
+  const unsigned char *p = (const unsigned char *) b.constData ();
+  int n = b.size ();
+  for (int i = 0; i < n;) {
+    unsigned c = p[i];
+    int len = c < 0x80 ? 1 : (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 0;
+    bool ok = len > 0 && i + len <= n;
+    for (int k = 1; ok && k < len; k++) ok = (p[i + k] & 0xc0) == 0x80;
+    if (ok && len > 1) {
+      QString seq = QString::fromUtf8 ((const char *) p + i, len);
+      /* overlong forms and surrogates decode to U+FFFD */
+      if (seq.contains (QChar (0xfffd))) ok = false;
+      else { out += seq; i += len; continue; }
+    }
+    out += QChar (c);   /* ASCII, or a stray byte read as Latin-1 */
+    i++;
+  }
+  return out;
+}
+
+QString mq_mb_decode (const char *s, int len)
+{
+  if (!s) return QString ();
+  QByteArray b = len < 0 ? QByteArray (s) : QByteArray (s, len);
+  auto utf8 = QStringDecoder (QStringDecoder::Utf8, QStringDecoder::Flag::Stateless);
+  QString u = utf8.decode (b);
+  if (!utf8.hasError ()) return u;
+  if (!utf8_locale ()) {
+    /* another 8-bit codeset than Latin-1 (KOI8-R ...) */
+    const char *cs = nl_langinfo (CODESET);
+    if (cs && *cs && strcasecmp (cs, "ANSI_X3.4-1968") && strcasecmp (cs, "ISO-8859-1")) {
+      auto local = QStringDecoder (cs, QStringDecoder::Flag::Stateless);
+      if (local.isValid ()) {
+        QString t = local.decode (b);
+        if (!local.hasError ()) return t;
+      }
+    }
+  }
+  return mq_decode_mixed (b);
+}
+
+QByteArray mq_mb_encode (const QString &s)
+{
+  if (utf8_locale ()) return s.toUtf8 ();
+  /* the C locale and Latin-1: what fits stays 8-bit, as it came in */
+  bool latin1 = true;
+  for (QChar c : s) if (c.unicode () > 0xff) { latin1 = false; break; }
+  const char *cs = nl_langinfo (CODESET);
+  if (!latin1 && cs && strcasecmp (cs, "ANSI_X3.4-1968")) {
+    auto enc = QStringEncoder (cs, QStringEncoder::Flag::Stateless);
+    if (enc.isValid ()) { QByteArray b = enc.encode (s); if (!enc.hasError ()) return b; }
+  }
+  return latin1 ? s.toLatin1 () : s.toUtf8 ();
+}
+
+/* ---------- font sets, input methods (Athena text widgets) ----------
+ * A font set is one Qt font: Qt finds glyphs for every script itself.
+ * Multibyte strings are in the locale's encoding, wide strings wchar_t.
+ * There is no X input method; Qt delivers composed text as key events. */
+struct _XOC {
+  XFontStruct *fs;
+  char *base;
+  char *name;
+  XFontSetExtents ext;
+};
+
+extern "C" {
+XFontSet XCreateFontSet (Display *d, _Xconst char *base, char ***missing, int *nmissing, char **def)
+{ MQ_FWD (XCreateFontSet, d, d, base, missing, nmissing, def);
+  if (missing) *missing = nullptr;
+  if (nmissing) *nmissing = 0;
+  if (def) *def = (char *) "";
+  if (!base) return nullptr;
+  /* the first pattern of the comma-separated list names the font */
+  QByteArray first = QByteArray (base).split (',').first ().trimmed ();
+  XFontStruct *fs = XLoadQueryFont (d, first.constData ());
+  if (!fs) return nullptr;
+  XFontSet set = (XFontSet) calloc (1, sizeof (struct _XOC));
+  set->fs = fs;
+  set->base = strdup (base);
+  set->name = strdup (first.constData ());
+  XRectangle r = { 0, (short) -fs->ascent, (unsigned short) fs->max_bounds.width, (unsigned short) (fs->ascent + fs->descent) };
+  set->ext.max_ink_extent = r;
+  set->ext.max_logical_extent = r;
+  return set;
+}
+
+void XFreeFontSet (Display *d, XFontSet set)
+{ MQ_FWD (XFreeFontSet, d, d, set);
+  if (!set) return;
+  XFreeFont (d, set->fs);
+  free (set->base);
+  free (set->name);
+  free (set);
+}
+
+XFontSetExtents *XExtentsOfFontSet (XFontSet set) { return set ? &set->ext : nullptr; }
+
+int XFontsOfFontSet (XFontSet set, XFontStruct ***fonts, char ***names)
+{
+  if (!set) return 0;
+  *fonts = &set->fs;
+  *names = &set->name;
+  return 1;
+}
+
+char *XBaseFontNameListOfFontSet (XFontSet set) { return set ? set->base : nullptr; }
+char *XLocaleOfFontSet (XFontSet) { const char *l = setlocale (LC_CTYPE, nullptr); return (char *) (l ? l : "C"); }
+Bool XContextDependentDrawing (XFontSet) { return False; }
+Bool XDirectionalDependentDrawing (XFontSet) { return False; }
+Bool XContextualDrawing (XFontSet) { return False; }
+}
+
+static QString wc_string (const wchar_t *s, int len) { return QString::fromWCharArray (s, len); }
+
+static int set_width (XFontSet set, const QString &t) { return x_text_width (mq_font_for (set ? set->fs->fid : 0), t); }
+
+static int set_extents (XFontSet set, const QString &t, XRectangle *ink, XRectangle *logical)
+{
+  int w = set_width (set, t);
+  XRectangle r = { 0, (short) (set ? -set->fs->ascent : 0), (unsigned short) w,
+                   (unsigned short) (set ? set->fs->ascent + set->fs->descent : 0) };
+  if (ink) *ink = r;
+  if (logical) *logical = r;
+  return w;
+}
+
+static void set_draw (Drawable d, XFontSet set, GC gc, int x, int y, const QString &t, bool image)
+{
+  if (!set || !gc) return;
+  Font old = gc->v.font;
+  gc->v.font = set->fs->fid;
+  draw_text (d, gc, x, y, t, image);
+  gc->v.font = old;
+}
+
+extern "C" {
+int XmbTextEscapement (XFontSet set, _Xconst char *s, int len) { return set_width (set, mq_mb_decode (s, len)); }
+int XwcTextEscapement (XFontSet set, _Xconst wchar_t *s, int len) { return set_width (set, wc_string (s, len)); }
+int Xutf8TextEscapement (XFontSet set, _Xconst char *s, int len) { return set_width (set, QString::fromUtf8 (s, len)); }
+int XmbTextExtents (XFontSet set, _Xconst char *s, int len, XRectangle *ink, XRectangle *logical) { return set_extents (set, mq_mb_decode (s, len), ink, logical); }
+int XwcTextExtents (XFontSet set, _Xconst wchar_t *s, int len, XRectangle *ink, XRectangle *logical) { return set_extents (set, wc_string (s, len), ink, logical); }
+int Xutf8TextExtents (XFontSet set, _Xconst char *s, int len, XRectangle *ink, XRectangle *logical) { return set_extents (set, QString::fromUtf8 (s, len), ink, logical); }
+
+void XmbDrawString (Display *, Drawable d, XFontSet set, GC gc, int x, int y, _Xconst char *s, int len) { set_draw (d, set, gc, x, y, mq_mb_decode (s, len), false); }
+void XmbDrawImageString (Display *, Drawable d, XFontSet set, GC gc, int x, int y, _Xconst char *s, int len) { set_draw (d, set, gc, x, y, mq_mb_decode (s, len), true); }
+void XwcDrawString (Display *, Drawable d, XFontSet set, GC gc, int x, int y, _Xconst wchar_t *s, int len) { set_draw (d, set, gc, x, y, wc_string (s, len), false); }
+void XwcDrawImageString (Display *, Drawable d, XFontSet set, GC gc, int x, int y, _Xconst wchar_t *s, int len) { set_draw (d, set, gc, x, y, wc_string (s, len), true); }
+void Xutf8DrawString (Display *, Drawable d, XFontSet set, GC gc, int x, int y, _Xconst char *s, int len) { set_draw (d, set, gc, x, y, QString::fromUtf8 (s, len), false); }
+void Xutf8DrawImageString (Display *, Drawable d, XFontSet set, GC gc, int x, int y, _Xconst char *s, int len) { set_draw (d, set, gc, x, y, QString::fromUtf8 (s, len), true); }
+
+void XmbDrawText (Display *, Drawable d, GC gc, int x, int y, XmbTextItem *items, int n)
+{
+  XFontSet set = nullptr;
+  for (int i = 0; i < n; i++) {
+    if (items[i].font_set) set = items[i].font_set;
+    x += items[i].delta;
+    QString t = mq_mb_decode (items[i].chars, items[i].nchars);
+    set_draw (d, set, gc, x, y, t, false);
+    x += set_width (set, t);
+  }
+}
+
+/* wide-character text properties travel as UTF-8 */
+int XwcTextListToTextProperty (Display *d, wchar_t **list, int count, XICCEncodingStyle style, XTextProperty *tp)
+{
+  QList<QByteArray> bytes;
+  QList<char *> ptrs;
+  for (int i = 0; i < count; i++) bytes << QString::fromWCharArray (list[i]).toUtf8 ();
+  for (QByteArray &b : bytes) ptrs << b.data ();
+  return Xutf8TextListToTextProperty (d, ptrs.data (), count, style, tp);
+}
+
+int XwcTextPropertyToTextList (Display *d, const XTextProperty *tp, wchar_t ***list, int *count)
+{
+  char **mb = nullptr;
+  int n = 0;
+  int ret = Xutf8TextPropertyToTextList (d, tp, &mb, &n);
+  *list = (wchar_t **) calloc (n + 1, sizeof (wchar_t *));
+  for (int i = 0; i < n; i++) {
+    QString s = QString::fromUtf8 (mb[i]);
+    (*list)[i] = (wchar_t *) calloc (s.size () + 1, sizeof (wchar_t));
+    s.toWCharArray ((*list)[i]);
+  }
+  *count = n;
+  XFreeStringList (mb);
+  return ret;
+}
+
+void XwcFreeStringList (wchar_t **list)
+{
+  if (!list) return;
+  for (wchar_t **p = list; *p; p++) free (*p);
+  free (list);
+}
+
+/* no input method server: programs fall back to XLookupString */
+XIM XOpenIM (Display *, struct _XrmHashBucketRec *, char *, char *) { return nullptr; }
+Status XCloseIM (XIM) { return 1; }
+Display *XDisplayOfIM (XIM) { return mq_display; }
+char *XGetIMValues (XIM, ...) { return (char *) "unsupported"; }
+char *XSetIMValues (XIM, ...) { return (char *) "unsupported"; }
+XIC XCreateIC (XIM, ...) { return nullptr; }
+void XDestroyIC (XIC) {}
+void XSetICFocus (XIC) {}
+void XUnsetICFocus (XIC) {}
+char *XGetICValues (XIC, ...) { return (char *) "unsupported"; }
+char *XSetICValues (XIC, ...) { return (char *) "unsupported"; }
+XIM XIMOfIC (XIC) { return nullptr; }
+Bool XFilterEvent (XEvent *, Window) { return False; }
+Bool XRegisterIMInstantiateCallback (Display *, struct _XrmHashBucketRec *, char *, char *, XIDProc, XPointer) { return False; }
+Bool XUnregisterIMInstantiateCallback (Display *, struct _XrmHashBucketRec *, char *, char *, XIDProc, XPointer) { return False; }
+
+static int lookup (XKeyEvent *e, char *buf, int n, KeySym *keysym, Status *status)
+{
+  KeySym k = 0;
+  int len = XLookupString (e, buf, n, &k, nullptr);
+  if (keysym) *keysym = k;
+  if (status) *status = len ? (k ? XLookupBoth : XLookupChars) : (k ? XLookupKeySym : XLookupNone);
+  return len;
+}
+
+int XmbLookupString (XIC, XKeyPressedEvent *e, char *buf, int n, KeySym *keysym, Status *status) { return lookup (e, buf, n, keysym, status); }
+int Xutf8LookupString (XIC, XKeyPressedEvent *e, char *buf, int n, KeySym *keysym, Status *status) { return lookup (e, buf, n, keysym, status); }
+int XwcLookupString (XIC, XKeyPressedEvent *e, wchar_t *buf, int n, KeySym *keysym, Status *status)
+{
+  char mb[16];
+  int len = lookup (e, mb, sizeof mb, keysym, status);
+  QString s = QString::fromLatin1 (mb, len);
+  int m = qMin ((int) s.size (), n);
+  for (int i = 0; i < m; i++) buf[i] = s[i].unicode ();
+  return m;
+}
+
+/* a nested list is the name/value pairs up to the NULL name */
+XVaNestedList XVaCreateNestedList (int, ...)
+{
+  va_list ap;
+  int n = 0;
+  va_start (ap, 0);
+  while (va_arg (ap, char *)) { (void) va_arg (ap, void *); n++; }
+  va_end (ap);
+  void **list = (void **) calloc (2 * n + 1, sizeof (void *));
+  va_start (ap, 0);
+  for (int i = 0; i < 2 * n; i++) list[i] = va_arg (ap, void *);
+  va_end (ap);
+  return list;
+}
+
+/* cut buffers: buffer 0 is the selection, the others are not kept */
+char *XFetchBuffer (Display *d, int *nbytes, int buffer)
+{
+  if (buffer == 0) return XFetchBytes (d, nbytes);
+  if (nbytes) *nbytes = 0;
+  return nullptr;
+}
+int XStoreBuffer (Display *d, _Xconst char *bytes, int nbytes, int buffer) { return buffer == 0 ? XStoreBytes (d, bytes, nbytes) : 1; }
+int XRotateBuffers (Display *, int) { return 1; }
+
+int XGetInputFocus (Display *d, Window *focus, int *revert)
+{ MQ_FWD (XGetInputFocus, d, d, focus, revert);
+  Window w = PointerRoot;
+  for (QWidget *f = QApplication::focusWidget (); f; f = f->parentWidget ())
+    if (Widget xw = mq_from_qobject (f)) { w = mq_window_for (xw); break; }
+  if (focus) *focus = w;
+  if (revert) *revert = RevertToParent;
+  return 1;
+}
+
+int XChangeActivePointerGrab (Display *, unsigned int, Cursor, Time) { return 1; }
 } /* extern "C" */

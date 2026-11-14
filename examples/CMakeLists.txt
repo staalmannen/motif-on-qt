@@ -28,6 +28,8 @@ motif_program (autopopups autopopups.c)
 
 # Regression tests (our own small programs)
 motif_program (formchain ${CMAKE_SOURCE_DIR}/tests/formchain.c)
+motif_program (athena ${CMAKE_SOURCE_DIR}/tests/athena.c)
+target_link_libraries (athena PRIVATE Xaw7 Xmu Xpm)
 
 # The headers compile as C++17 (C++ Motif programs such as xpdf)
 add_executable (cxx-headers ${CMAKE_SOURCE_DIR}/tests/cxx-headers.cpp)

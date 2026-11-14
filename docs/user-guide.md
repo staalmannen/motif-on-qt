@@ -1,7 +1,7 @@
 # User guide
 
-Motif on Qt lets you build an old Motif program from its unmodified sources
-and run it on any system with Qt 6 - Wayland, X11, Windows, macOS - without
+Motif on Qt lets you build an old Motif or Athena (Xaw) program from its
+unmodified sources and run it on any system with Qt 6 - Wayland, X11, Windows, macOS - without
 libXm, libXt or an X server.
 
 ## Install
@@ -27,8 +27,9 @@ Nothing of it is needed to *run* the programs you build: they only need Qt.
 ## Build a Motif program
 
 `motif-on-qt-env` points a build at Motif on Qt: headers first in the
-include path, `-lXm -lXt -lX11` (and `-lXext`, `-lXmu`, `-lXpm` ...)
-resolving to it, and pkg-config answering for `x11`, `xt` and `motif`.
+include path, `-lXm -lXt -lX11` (and `-lXaw7`, `-lXaw`, `-lXext`, `-lXmu`,
+`-lXpm` ...) resolving to it, and pkg-config answering for `x11`, `xt`,
+`motif`, `xaw7`, `xmu` and `xpm`. Athena programs build the same way.
 
 **configure scripts:**
 
@@ -85,7 +86,8 @@ The program is an ordinary Qt application:
 ## What works and what does not
 
 See the README: almost all of Xt and the Motif widget set, program-defined
-widget classes, Xlib drawing, selections and the clipboard. Not available:
+widget classes, the Athena widgets, Xmu and Xpm, Xlib drawing, selections
+and the clipboard. Not available:
 UIL/Mrm, drag and drop, a few Motif 2.2+ extension widgets (Container,
 Notebook, TabStack, Column ...), PseudoColor colormap tricks.
 
@@ -96,6 +98,9 @@ Notebook, TabStack, Column ...), PseudoColor colormap tricks.
 - *errors about `XmPushButtonPart`, `primitive.foreground` and the like in
   your code*: the program reads the internals of a Motif widget class other
   than the base classes; that part of Motif is not reproduced.
+- *`FMT8BIT` errors in `X11/Xaw/Text.h`*: the file includes both `Xm/Xm.h`
+  and the Athena text headers, whose `FMT8BIT` clash (with the real
+  libraries too); `#undef FMT8BIT` before including the Athena header.
 - The program finds the system's libXm instead: make sure the build uses
   `motif-on-qt-env` (or the include/library paths) and that nothing adds
   `-I/usr/include` before them.

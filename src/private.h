@@ -143,6 +143,8 @@ struct MqClassRegistrar {
 Cardinal mq_instance_size (unsigned kind);
 /* the size of a Motif class's real instance record (xm_records.c), 0 if none */
 extern "C" unsigned mq_motif_record_size (const char *class_name);
+/* Motif's base class extension with the fast subclass bits (xm_misc.cpp) */
+extern "C" void mq_motif_class_extension (WidgetClass c);
 extern "C" void mq_sync_label_record (Widget w, XmString label, unsigned char label_type, XmRenderTable font,
                                       unsigned char alignment, Pixmap pixmap, Pixmap pixmap_insen,
                                       Dimension margin_width, Dimension margin_height, Boolean recompute_size);
@@ -295,10 +297,22 @@ extern Screen *mq_screen_ptr;
     static auto real_ = (decltype (&fn)) mq_real_symbol (#fn); \
     if (real_) return real_ (__VA_ARGS__); } } while (0)
 
+/* converters a program registered (xt_resources.cpp) */
+void mq_add_converter (const char *from, const char *to, XtTypeConverter conv, XtConverter old, XtConvertArgList args, Cardinal n);
+bool mq_program_convert (Widget w, const char *from_type, XrmValue *from, const char *to_type, XrmValue *to);
+
+/* program text <-> QString. Bytes that are valid UTF-8 are UTF-8; others are
+ * in the locale's 8-bit codeset (Latin-1 in the C locale): DDD's sources and
+ * many old programs are Latin-1 whatever the locale (xlib.cpp) */
+QString mq_mb_decode (const char *s, int len = -1);
+QByteArray mq_mb_encode (const QString &s);
+QString mq_decode_mixed (const QByteArray &b);
+
 /* Xlib side (xlib.cpp) */
 QFont mq_font_from_xlfd (const QString &name, bool *ok);
 QFont mq_font_for (Font fid);
 Pixmap mq_pixmap_from_image (const QImage &img);
+Pixmap mq_bitmap_from_image (const QImage &img);   /* depth 1: white is 1 */
 
 /* widget-layer helpers (xm_*.cpp) */
 QFont mq_widget_font (Widget w, const char *which = nullptr);   /* which: XmNbuttonFontList etc. */

@@ -977,6 +977,10 @@ Widget XmCreateMenuBar (Widget p, char *name, ArgList al, Cardinal ac)
 
 Widget XmCreatePulldownMenu (Widget p, char *name, ArgList al, Cardinal ac) { return create_menu (p, name, al, ac, XmMENU_PULLDOWN); }
 Widget XmCreatePopupMenu (Widget p, char *name, ArgList al, Cardinal ac) { return create_menu (p, name, al, ac, XmMENU_POPUP); }
+Widget XmCreateMenuShell (Widget p, char *name, ArgList al, Cardinal ac)
+{
+  return XtCreatePopupShell (name, xmMenuShellWidgetClass, p, al, ac);
+}
 
 Widget XmCreateOptionMenu (Widget p, char *name, ArgList al, Cardinal ac)
 {
