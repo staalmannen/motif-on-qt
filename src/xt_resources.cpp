@@ -729,7 +729,10 @@ static void parse_options (XrmDatabase db, XrmOptionDescRec *opts, Cardinal n, i
     find (std_options, XtNumber (std_options));
     if (!hit) { argv[out++] = argv[i]; continue; }
     QByteArray spec = hit->specifier ? QByteArray (hit->specifier) : QByteArray ();
-    if (spec.startsWith ('.')) spec.prepend (app_name);
+    /* as Xlib: the program name, then the specifier, bound tightly unless
+     * it starts with '*' ("showVersion" is "ddd.showVersion") */
+    if (!spec.startsWith ('.') && !spec.startsWith ('*')) spec.prepend ('.');
+    spec.prepend (app_name);
     switch (hit->argKind) {
     case XrmoptionNoArg: db_put (db, spec, hit->value ? (const char *) hit->value : ""); break;
     case XrmoptionIsArg: db_put (db, spec, a); break;

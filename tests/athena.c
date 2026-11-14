@@ -79,8 +79,25 @@ static void late_checks (XtPointer p, XtIntervalId *id)
   exit (0);
 }
 
+/* XrmParseCommand binds a specifier without '.' or '*' to the program name
+ * with '.' (DDD's --version) */
+static void check_parse_command (void)
+{
+  static XrmOptionDescRec opts[] = { { "--version", "showVersion", XrmoptionNoArg, (XPointer) "on" } };
+  int ac = 2;
+  char *av[] = { "ddd", "--version", NULL };
+  XrmDatabase db = XrmGetStringDatabase ("");
+  XrmParseCommand (&db, opts, 1, "Ddd", &ac, av);
+  char *type;
+  XrmValue v;
+  CHECK (ac == 1);
+  CHECK (XrmGetResource (db, "ddd.showVersion", "Ddd.showVersion", &type, &v) && strcmp ((char *) v.addr, "on") == 0);
+  XrmDestroyDatabase (db);
+}
+
 int main (int argc, char **argv)
 {
+  check_parse_command ();
   XtSetTypeConverter (XmRString, XmRXmString, cvt_xmstring, NULL, 0, XtCacheNone, NULL);
   top = XtVaAppInitialize (&app, "Athena", NULL, 0, &argc, argv, NULL, NULL);
   CHECK (XtIsTopLevelShell (top) && XtIsWMShell (top));
