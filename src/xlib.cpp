@@ -1789,6 +1789,57 @@ char **XListFonts (Display * a0_, _Xconst char *pattern, int a2_, int *count)
 int XFreeFontNames (char **list) { if (list) { for (char **p = list; *p; p++) free (*p); free (list); } return 1; }
 
 /* ---------- keysyms ---------- */
+} /* extern "C" */
+
+/* the character a keysym types, as Xlib's XLookupString finds it: Latin-1
+ * keysyms, Unicode keysyms (0x01000000 + code point), the legacy keysyms of
+ * keysymdef.h (Cyrillic, Greek, the euro sign ...), the keypad, and the
+ * control characters of Return, Tab ...; with Control, ASCII @..~ become
+ * control characters. 0: the key types nothing */
+uint mq_keysym_ucs (KeySym k)
+{
+  if ((k >= 0x20 && k <= 0x7e) || (k >= 0xa0 && k <= 0xff)) return (uint) k;
+  if ((k & 0xff000000) == 0x01000000) return (uint) (k & 0xffffff);
+  static const struct { unsigned ks, ucs; } table[] = {
+#include "generated/keysym_ucs.inc"
+  };
+  unsigned lo = 0, hi = sizeof table / sizeof table[0];
+  while (lo < hi) {
+    unsigned mid = (lo + hi) / 2;
+    if (table[mid].ks == k) return table[mid].ucs;
+    if (table[mid].ks < k) lo = mid + 1; else hi = mid;
+  }
+  if (k >= XK_KP_0 && k <= XK_KP_9) return '0' + (uint) (k - XK_KP_0);
+  switch (k) {
+  case XK_KP_Space: return ' ';
+  case XK_KP_Multiply: return '*';
+  case XK_KP_Add: return '+';
+  case XK_KP_Separator: return ',';
+  case XK_KP_Subtract: return '-';
+  case XK_KP_Decimal: return '.';
+  case XK_KP_Divide: return '/';
+  case XK_KP_Equal: return '=';
+  case XK_Return: case XK_KP_Enter: return '\r';
+  case XK_BackSpace: return '\b';
+  case XK_Tab: case XK_KP_Tab: return '\t';
+  case XK_Linefeed: return '\n';
+  case XK_Escape: return 0x1b;
+  case XK_Delete: return 0x7f;
+  default: return 0;
+  }
+}
+
+uint mq_keysym_text (KeySym k, unsigned state)
+{
+  uint c = mq_keysym_ucs (k);
+  if (c && (state & ControlMask)) {
+    if (c >= '@' && c <= '~') c &= 0x1f;
+    else if (c == ' ') c = 0;
+  }
+  return c;
+}
+
+extern "C" {
 KeySym XStringToKeysym (_Xconst char *s)
 {
   if (!s || !*s) return NoSymbol;
@@ -1803,6 +1854,13 @@ char *XKeysymToString (KeySym k)
 {
   for (auto it = keysym_names ().constBegin (); it != keysym_names ().constEnd (); ++it)
     if (it.value () == k) return const_cast<char *> (it.key ().constData ());
+  /* Unicode keysyms are named U+hex, as Xlib names them ("U20AC") */
+  if ((k & 0xff000000) == 0x01000000) {
+    static QHash<KeySym, QByteArray> names;
+    QByteArray &n = names[k];
+    if (n.isEmpty ()) n = "U" + QByteArray::number ((qulonglong) (k & 0xffffff), 16).toUpper ().rightJustified (4, '0');
+    return n.data ();
+  }
   return nullptr;
 }
 
@@ -1826,24 +1884,30 @@ int XLookupString (XKeyEvent *e, char *buf, int n, KeySym *keysym, XComposeStatu
 {
   KeySym k = e->keycode;
   if (keysym) *keysym = k;
-  char c = 0;
-  if (k >= 0x20 && k < 0x100) c = (char) k;
-  else if (k == XK_Return || k == XK_KP_Enter) c = '\r';
-  else if (k == XK_BackSpace) c = '\b';
-  else if (k == XK_Tab) c = '\t';
-  else if (k == XK_Escape) c = 0x1b;
-  else if (k == XK_Delete) c = 0x7f;
-  if (c && (e->state & ControlMask) && c >= '@' && c <= '~') c &= 0x1f;
+  uint c = mq_keysym_text (k, e->state);
   if (!c || n < 1) return 0;
-  buf[0] = c;
-  if (n > 1) buf[1] = 0;
-  return 1;
+  /* Latin-1 as the Xlib specification says; other characters in the
+   * locale's encoding */
+  QByteArray b = c < 0x100 ? QByteArray (1, (char) c) : mq_mb_encode (QString::fromUcs4 ((const char32_t *) &c, 1));
+  int len = qMin ((int) b.size (), n);
+  memcpy (buf, b.constData (), len);
+  if (len < n) buf[len] = 0;
+  return len;
 }
 
 void XConvertCase (KeySym k, KeySym *lower, KeySym *upper)
 {
-  *lower = k < 0x100 ? tolower ((int) k) : k;
-  *upper = k < 0x100 ? toupper ((int) k) : k;
+  *lower = *upper = k;
+  if (k < 0x100) {
+    *lower = tolower ((int) k);
+    *upper = toupper ((int) k);
+    if (k >= 0xc0 && k <= 0xde && k != 0xd7) *lower = k + 0x20;      /* Latin-1 letters */
+    if (k >= 0xe0 && k <= 0xfe && k != 0xf7) *upper = k - 0x20;
+  } else if ((k & 0xff000000) == 0x01000000) {
+    char32_t c = (char32_t) (k & 0xffffff);
+    *lower = 0x01000000 | QChar::toLower (c);
+    *upper = 0x01000000 | QChar::toUpper (c);
+  }
 }
 
 int XDisplayKeycodes (Display * a0_, int *min, int *max) { MQ_FWD (XDisplayKeycodes, a0_, a0_, min, max); *min = 8; *max = 255; return 1; }
@@ -2336,25 +2400,41 @@ Bool XFilterEvent (XEvent *, Window) { return False; }
 Bool XRegisterIMInstantiateCallback (Display *, struct _XrmHashBucketRec *, char *, char *, XIDProc, XPointer) { return False; }
 Bool XUnregisterIMInstantiateCallback (Display *, struct _XrmHashBucketRec *, char *, char *, XIDProc, XPointer) { return False; }
 
-static int lookup (XKeyEvent *e, char *buf, int n, KeySym *keysym, Status *status)
+/* the text of a key press, for the Xmb/Xutf8/Xwc lookups; a buffer that
+ * is too small gets nothing and XBufferOverflow with the size needed */
+static int lookup_bytes (XKeyEvent *e, const QByteArray &bytes, char *buf, int n, KeySym *keysym, Status *status)
 {
-  KeySym k = 0;
-  int len = XLookupString (e, buf, n, &k, nullptr);
+  KeySym k = e->keycode;
   if (keysym) *keysym = k;
-  if (status) *status = len ? (k ? XLookupBoth : XLookupChars) : (k ? XLookupKeySym : XLookupNone);
-  return len;
+  if (bytes.size () > n) {
+    if (status) *status = XBufferOverflow;
+    return bytes.size ();
+  }
+  memcpy (buf, bytes.constData (), bytes.size ());
+  if (status) *status = bytes.isEmpty () ? (k ? XLookupKeySym : XLookupNone) : (k ? XLookupBoth : XLookupChars);
+  return bytes.size ();
 }
 
-int XmbLookupString (XIC, XKeyPressedEvent *e, char *buf, int n, KeySym *keysym, Status *status) { return lookup (e, buf, n, keysym, status); }
-int Xutf8LookupString (XIC, XKeyPressedEvent *e, char *buf, int n, KeySym *keysym, Status *status) { return lookup (e, buf, n, keysym, status); }
+static QString key_text (XKeyEvent *e)
+{
+  char32_t c = mq_keysym_text (e->keycode, e->state);
+  return c ? QString::fromUcs4 (&c, 1) : QString ();
+}
+
+int XmbLookupString (XIC, XKeyPressedEvent *e, char *buf, int n, KeySym *keysym, Status *status) { return lookup_bytes (e, mq_mb_encode (key_text (e)), buf, n, keysym, status); }
+int Xutf8LookupString (XIC, XKeyPressedEvent *e, char *buf, int n, KeySym *keysym, Status *status) { return lookup_bytes (e, key_text (e).toUtf8 (), buf, n, keysym, status); }
 int XwcLookupString (XIC, XKeyPressedEvent *e, wchar_t *buf, int n, KeySym *keysym, Status *status)
 {
-  char mb[16];
-  int len = lookup (e, mb, sizeof mb, keysym, status);
-  QString s = QString::fromLatin1 (mb, len);
-  int m = qMin ((int) s.size (), n);
-  for (int i = 0; i < m; i++) buf[i] = s[i].unicode ();
-  return m;
+  std::wstring w = key_text (e).toStdWString ();
+  KeySym k = e->keycode;
+  if (keysym) *keysym = k;
+  if ((int) w.size () > n) {
+    if (status) *status = XBufferOverflow;
+    return w.size ();
+  }
+  memcpy (buf, w.data (), w.size () * sizeof (wchar_t));
+  if (status) *status = w.empty () ? (k ? XLookupKeySym : XLookupNone) : (k ? XLookupBoth : XLookupChars);
+  return w.size ();
 }
 
 /* a nested list is the name/value pairs up to the NULL name */
