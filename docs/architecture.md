@@ -112,8 +112,9 @@ work; program subclasses inherit a copy before their `class_part_initialize`.
 ## Text encoding
 
 Program text (XmText, XmString, titles, the clipboard, `Xmb*`) is decoded
-by `mq_mb_decode`: valid UTF-8 is UTF-8, anything else is the locale's 8-bit
-codeset, Latin-1 in the C locale. `mq_mb_encode` writes back UTF-8 under a
+by `mq_mb_decode`: valid UTF-8 is UTF-8; otherwise a non-Latin-1 8-bit
+locale codeset if there is one, else valid UTF-8 sequences as UTF-8 and the
+other bytes as Latin-1 (programs join strings of both kinds). `mq_mb_encode` writes back UTF-8 under a
 UTF-8 locale and Latin-1 when the text fits, so Latin-1 round-trips.
 
 ## Events

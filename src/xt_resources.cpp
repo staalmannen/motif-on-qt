@@ -541,6 +541,29 @@ static void db_put (XrmDatabase db, const QByteArray &spec, const QByteArray &va
   db->entries.append (e);
 }
 
+/* a resource value's escapes, as Xlib reads them: \n a newline, \ooo a byte
+ * in octal (DDD writes UTF-8 that way), "\ " and "\<tab>" the blank
+ * itself (to keep leading blanks), \\ a backslash; other backslashes stay */
+static QByteArray xrm_unescape (const QByteArray &v)
+{
+  if (!v.contains ('\\')) return v;
+  QByteArray out;
+  out.reserve (v.size ());
+  for (int i = 0; i < v.size (); i++) {
+    char c = v[i];
+    if (c != '\\' || i + 1 >= v.size ()) { out += c; continue; }
+    char d = v[i + 1];
+    auto octal = [] (char x) { return x >= '0' && x <= '7'; };
+    if (d == 'n') { out += '\n'; i++; }
+    else if (d == ' ' || d == '\t' || d == '\\') { out += d; i++; }
+    else if (i + 3 < v.size () && octal (d) && octal (v[i + 2]) && octal (v[i + 3])) {
+      out += (char) (((d - '0') << 6) | ((v[i + 2] - '0') << 3) | (v[i + 3] - '0'));
+      i += 3;
+    } else out += c;
+  }
+  return out;
+}
+
 static void db_put_line (XrmDatabase db, const QByteArray &line)
 {
   QByteArray l = line;
@@ -548,9 +571,7 @@ static void db_put_line (XrmDatabase db, const QByteArray &line)
   if (colon <= 0 || l.trimmed ().startsWith ('!') || l.trimmed ().startsWith ('#')) return;
   QByteArray value = l.mid (colon + 1);
   while (!value.isEmpty () && (value[0] == ' ' || value[0] == '\t')) value.remove (0, 1);
-  /* \n escapes as in X resource files */
-  value.replace ("\\n", "\n");
-  db_put (db, l.left (colon), value);
+  db_put (db, l.left (colon), xrm_unescape (value));
 }
 
 static void db_put_file_text (XrmDatabase db, const QByteArray &text)

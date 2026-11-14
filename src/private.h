@@ -306,6 +306,7 @@ bool mq_program_convert (Widget w, const char *from_type, XrmValue *from, const 
  * many old programs are Latin-1 whatever the locale (xlib.cpp) */
 QString mq_mb_decode (const char *s, int len = -1);
 QByteArray mq_mb_encode (const QString &s);
+QString mq_decode_mixed (const QByteArray &b);
 
 /* Xlib side (xlib.cpp) */
 QFont mq_font_from_xlfd (const QString &name, bool *ok);

@@ -95,6 +95,11 @@ Things that cost time once; check here before debugging something similar.
   C locale): Qt's fromLocal8Bit is always UTF-8, so decode invalid UTF-8 as
   Latin-1.
 - `XtRFontStruct` resources are XFontStruct pointers, not font lists.
+- Resource values have escapes: `\ooo` octal bytes (DDD writes its UTF-8
+  names that way), `\ ` a kept blank, `\n`, `\\`. XrmParseCommand binds a
+  specifier without `.`/`*` to the program name with `.`.
+- One string may hold a Latin-1 byte next to a UTF-8 sequence (DDD's About
+  text); decode sequence by sequence, not all or nothing.
 - Xm.h's `FMT8BIT` macro clashes with Xaw's Text.h, as with the real
   libraries.
 - Rebuilding a program after the library changed: make does not see the

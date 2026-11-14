@@ -93,6 +93,14 @@ static void check_parse_command (void)
   CHECK (ac == 1);
   CHECK (XrmGetResource (db, "ddd.showVersion", "Ddd.showVersion", &type, &v) && strcmp ((char *) v.addr, "on") == 0);
   XrmDestroyDatabase (db);
+
+  /* value escapes as Xlib reads them: octal bytes, kept blanks, \n */
+  db = XrmGetStringDatabase ("Ddd*name: L\\303\\274tkehaus\nDdd*help: \\ Help\\ \nDdd*two: a\\nb\nDdd*re: \\d");
+  CHECK (XrmGetResource (db, "ddd.name", "Ddd.Name", &type, &v) && strcmp ((char *) v.addr, "L\303\274tkehaus") == 0);
+  CHECK (XrmGetResource (db, "ddd.help", "Ddd.Help", &type, &v) && strcmp ((char *) v.addr, " Help ") == 0);
+  CHECK (XrmGetResource (db, "ddd.two", "Ddd.Two", &type, &v) && strcmp ((char *) v.addr, "a\nb") == 0);
+  CHECK (XrmGetResource (db, "ddd.re", "Ddd.Re", &type, &v) && strcmp ((char *) v.addr, "\\d") == 0);
+  XrmDestroyDatabase (db);
 }
 
 int main (int argc, char **argv)
@@ -150,6 +158,20 @@ int main (int argc, char **argv)
   char *back = XmTextGetString (mtext);
   CHECK (back && strcmp (back, "Copyright \251 L\374tkehaus") == 0);
   XtFree (back);
+
+  /* one string with a Latin-1 byte and a UTF-8 sequence: each as written */
+  XmString mixed = XmStringCreateLocalized ("\251 Universit\303\244t");
+  char *mt = NULL;
+  XmStringGetLtoR (mixed, XmFONTLIST_DEFAULT_TAG, &mt);
+  /* an XmString keeps the bytes it was given, as in Motif */
+  CHECK (mt && strcmp (mt, "\251 Universit\303\244t") == 0);
+  XtFree (mt);
+  /* text widgets hold characters: in the C locale both come back as Latin-1 */
+  XmTextSetString (mtext, "\251 Universit\303\244t");
+  back = XmTextGetString (mtext);
+  CHECK (back && strcmp (back, "\251 Universit\344t") == 0);
+  XtFree (back);
+  XmStringFree (mixed);
 
   /* Xpm images: the parsed form and back */
   XpmImage im;

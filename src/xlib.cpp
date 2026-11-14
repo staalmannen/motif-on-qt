@@ -2117,6 +2117,32 @@ static bool utf8_locale ()
   return cs && (!strcasecmp (cs, "UTF-8") || !strcasecmp (cs, "utf8"));
 }
 
+/* valid UTF-8 sequences as UTF-8, every other byte as Latin-1: programs
+ * join strings of both kinds (DDD: a Latin-1 copyright sign next to UTF-8
+ * names) */
+QString mq_decode_mixed (const QByteArray &b)
+{
+  QString out;
+  out.reserve (b.size ());
+  const unsigned char *p = (const unsigned char *) b.constData ();
+  int n = b.size ();
+  for (int i = 0; i < n;) {
+    unsigned c = p[i];
+    int len = c < 0x80 ? 1 : (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 0;
+    bool ok = len > 0 && i + len <= n;
+    for (int k = 1; ok && k < len; k++) ok = (p[i + k] & 0xc0) == 0x80;
+    if (ok && len > 1) {
+      QString seq = QString::fromUtf8 ((const char *) p + i, len);
+      /* overlong forms and surrogates decode to U+FFFD */
+      if (seq.contains (QChar (0xfffd))) ok = false;
+      else { out += seq; i += len; continue; }
+    }
+    out += QChar (c);   /* ASCII, or a stray byte read as Latin-1 */
+    i++;
+  }
+  return out;
+}
+
 QString mq_mb_decode (const char *s, int len)
 {
   if (!s) return QString ();
@@ -2125,14 +2151,17 @@ QString mq_mb_decode (const char *s, int len)
   QString u = utf8.decode (b);
   if (!utf8.hasError ()) return u;
   if (!utf8_locale ()) {
+    /* another 8-bit codeset than Latin-1 (KOI8-R ...) */
     const char *cs = nl_langinfo (CODESET);
-    auto local = QStringDecoder (cs && *cs ? cs : "ISO-8859-1", QStringDecoder::Flag::Stateless);
-    if (local.isValid () && strcasecmp (cs, "ANSI_X3.4-1968")) {
-      QString t = local.decode (b);
-      if (!local.hasError ()) return t;
+    if (cs && *cs && strcasecmp (cs, "ANSI_X3.4-1968") && strcasecmp (cs, "ISO-8859-1")) {
+      auto local = QStringDecoder (cs, QStringDecoder::Flag::Stateless);
+      if (local.isValid ()) {
+        QString t = local.decode (b);
+        if (!local.hasError ()) return t;
+      }
     }
   }
-  return QString::fromLatin1 (b);
+  return mq_decode_mixed (b);
 }
 
 QByteArray mq_mb_encode (const QString &s)
