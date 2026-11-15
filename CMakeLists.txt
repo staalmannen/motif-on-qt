@@ -32,6 +32,7 @@ set (MQ_SOURCES
   src/xt_selection.cpp
   src/mq_script.cpp
   src/xt_foreign.cpp
+  src/xaw_qt.cpp
   src/xpm.cpp
   src/xim.cpp)
 
