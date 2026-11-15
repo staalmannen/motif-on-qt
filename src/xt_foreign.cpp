@@ -102,7 +102,7 @@ MqClass *mq_foreign_class (WidgetClass c)
   mc->set_other = nullptr;
   mc->get_other = nullptr;
   mc->initialize = nullptr;
-  if (!mc->create && (mc->kind & K_WIDGET)) mc->create = mq_xaw_create (/* w not available here; fallback in class creation */);
+  if (!mc->create && (mc->kind & K_WIDGET)) mc->create = mq_canvas_create;
   foreign_classes ().insert (c, mc);
 
   /* class initialization, as XtInitializeWidgetClass does it */
@@ -230,7 +230,7 @@ static const XtResource *find (const QList<ForeignRes> &list, const char *name)
 }
 
 /* XtSetValues on a resource of a foreign class (or a foreign parent's
-  * constraint); false if the name is not one of those */
+ * constraint); false if the name is not one of those */
 bool mq_foreign_store (Widget w, const char *name, XtArgVal v)
 {
   if (const ForeignInfo *fi = info_of (w))
@@ -260,7 +260,7 @@ bool mq_foreign_fetch (Widget w, const char *name, XtArgVal dest)
     if ((r = find (fi->resources, name))) src = (const char *) w + r->resource_offset;
   if (!r && R (w)->parent)
     if (const ForeignInfo *fi = info_of (R (w)->parent))
-      if ((r = find (fi->constraints, name)) && w->core.constraints) src = (char *) w->core.constraints + r->resource_offset;
+      if ((r = find (fi->constraints, name)) && w->core.constraints) src = (const char *) w->core.constraints + r->resource_offset;
   if (!r || !src) return false;
   if (dest) memcpy ((void *) dest, src, r->resource_size);
   return true;
@@ -540,4 +540,3 @@ static void foreign_unplace (Widget parent, Widget child)
   if (QWidget *cw = mq_qw (child)) cw->hide ();
   if (R (parent)->realized) mq_foreign_change_managed (parent);
 }
-
