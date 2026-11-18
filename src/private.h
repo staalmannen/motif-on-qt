@@ -30,6 +30,7 @@ static constexpr QEvent::Type MQ_QExpose = QEvent::Expose;
 inline QCursor mq_qcursor (int shape) { return QCursor (static_cast<Qt::CursorShape> (shape)); }
 
 #include <Xm/XmAll.h>
+/* the Motif 2.3 extension widgets (not in XmAll.h) */
 #include <Xm/SlideC.h>
 #include <Xm/DropDown.h>
 #include <Xm/ButtonBox.h>
@@ -49,6 +50,8 @@ inline QCursor mq_qcursor (int shape) { return QCursor (static_cast<Qt::CursorSh
 #include <Xm/PrimitiveP.h>
 #include <Xm/GadgetP.h>
 
+/* IntrinsicP.h and XmP.h define macros for names this library implements as
+ * functions (as libXt itself does, they are undefined here). */
 #undef XtDisplay
 #undef XtScreen
 #undef XtWindow
@@ -76,80 +79,275 @@ inline QCursor mq_qcursor (int shape) { return QCursor (static_cast<Qt::CursorSh
 
 #include <functional>
 
+/* ---------------------------------------------------------------- classes */
 enum ClassKind {
   K_OBJECT = 0, K_RECT = 1 << 0, K_WIDGET = 1 << 1, K_COMPOSITE = 1 << 2, K_CONSTRAINT = 1 << 3,
   K_SHELL = 1 << 4, K_PRIMITIVE = 1 << 5, K_MANAGER = 1 << 6, K_GADGET = 1 << 7, K_MENU_ITEM = 1 << 8
 };
 
 struct ResDef {
-  const char *cls; bool constraint; const char *name, *rclass, *rtype;
-  unsigned size; const char *dtype; XtArgVal dimm; const char *dstr;
+  const char *cls;          /* Motif class the resource belongs to */
+  bool constraint;          /* constraint resource (lives on the child) */
+  const char *name, *rclass, *rtype;
+  unsigned size;
+  const char *dtype;
+  XtArgVal dimm;            /* immediate default */
+  const char *dstr;         /* string default (converted on demand) */
 };
+
 typedef QObject *(*CreateProc) (Widget w);
-typedef void (*ApplyProc) (Widget w, const QByteArray &res);
+typedef void (*ApplyProc) (Widget w, const QByteArray &res);   /* empty res = apply everything */
 typedef bool (*FetchProc) (Widget w, const QByteArray &res, XtArgVal *out);
 typedef void (*ChildProc) (Widget parent, Widget child);
 typedef void (*WidgetProc) (Widget w);
-struct MqClass {
-  const char *class_name; MqClass *superclass; unsigned kind;
-  CreateProc create; ApplyProc apply; FetchProc fetch; ChildProc place, unplace; WidgetProc relayout, initialize;
-  WidgetClass xt; const char *res_class; QList<const ResDef *> *resolved, *resolved_constraints;
-  void (*set_other) (Widget, const char *, XtArgVal); bool (*get_other) (Widget, const char *, XtArgVal); bool foreign;
-};
-MqClass *mq_class (WidgetClass c);
-void mq_register_class (MqClass *c, Cardinal widget_size);
-struct MqXtClassRec { CoreClassPart core_class; char parts[512]; };
-struct MqClassRegistrar { MqClassRegistrar (MqClass *c, Cardinal widget_size) { mq_register_class (c, widget_size); } };
-Cardinal mq_instance_size (unsigned kind);
-extern "C" unsigned mq_motif_record_size (const char *class_name);
-extern "C" void mq_motif_class_extension (WidgetClass c);
-extern "C" void mq_sync_label_record (Widget, XmString, unsigned char, XmRenderTable, unsigned char, Pixmap, Pixmap, Dimension, Dimension, Boolean);
-extern "C" void mq_free_label_record (Widget w);
-#define MQ_DEFINE_CLASS_XT(var, rec, xtrec, name, super, kind, create, apply, fetch, place, unplace, relayout, init) \
-  MqClass rec = { name, super, kind, create, apply, fetch, place, unplace, relayout, init, (WidgetClass) &xtrec, nullptr, nullptr, nullptr, nullptr, nullptr, false }; \
-  WidgetClass var = (WidgetClass) &xtrec; static MqClassRegistrar rec##_registrar (&rec, mq_instance_size (kind));
-#define MQ_DEFINE_CLASS(var, rec, name, super, kind, create, apply, fetch, place, unplace, relayout, init) \
-  MqXtClassRec rec##_xt; MQ_DEFINE_CLASS_XT (var, rec, rec##_xt, name, super, kind, create, apply, fetch, place, unplace, relayout, init)
 
-class MqBridge;
-struct EventHandlerRec { EventMask mask; Boolean nonmaskable; XtEventHandler proc; XtPointer closure; };
-struct MqRec {
-  MqClass *klass = nullptr; QByteArray name; Widget parent = nullptr;
-  QPointer<QObject> obj; QPointer<QWidget> inner, content;
-  QHash<QByteArray, XtArgVal> res; QHash<QByteArray, QList<XtCallbackRec>> callbacks;
-  QList<Widget> children, popups; bool managed = false, realized = false, destroying = false, sensitive = true, is_popup = false, popped_up = false;
-  QList<EventHandlerRec> handlers; struct _TranslationData *translations = nullptr; MqBridge *bridge = nullptr;
-  Window window = 0; void *ext = nullptr; void (*ext_free) (void *) = nullptr; QByteArray scratch;
-  QList<QPair<QByteArray, XtArgVal>> deferred; QVector<Widget> xt_children, xt_popups;
-  QHash<QByteArray, QVector<XtCallbackRec>> xt_callback_arrays;
+/* How a widget class is implemented. Every class also has a genuine Xt class
+ * record (xt), which is what WidgetClass values point to: programs compare,
+ * subclass and read those. Classes a program defines itself get an MqClass
+ * built for them (foreign = true; see xt_foreign.cpp). */
+struct MqClass {
+  const char *class_name;   /* e.g. "XmPushButton"; also the key into the resource tables */
+  MqClass *superclass;
+  unsigned kind;
+  CreateProc create;
+  ApplyProc apply;
+  FetchProc fetch;
+  ChildProc place;          /* child became managed */
+  ChildProc unplace;        /* child became unmanaged / destroyed */
+  WidgetProc relayout;      /* constraints of a child changed */
+  WidgetProc initialize;    /* after create + resources: build internal children */
+  WidgetClass xt;           /* the Xt class record */
+  const char *res_class;    /* resource table to use if it differs from class_name */
+  QList<const ResDef *> *resolved;            /* cache: all normal resources incl. superclasses */
+  QList<const ResDef *> *resolved_constraints;
+  /* resources the class does not declare, forwarded to internal children
+     (DropDown's items ...); set before initialize they arrive afterwards */
+  void (*set_other) (Widget w, const char *name, XtArgVal value);
+  bool (*get_other) (Widget w, const char *name, XtArgVal dest);   /* writes *dest like XtGetValues */
+  bool foreign;
 };
+
+MqClass *mq_class (WidgetClass c);      /* nullptr for unknown, never for a valid class */
+void mq_register_class (MqClass *c, Cardinal widget_size);
+
+/* An Xt class record for classes with no real Motif type here: CoreClassPart
+ * plus room for the parts that follow it in Motif (programs only read those
+ * through the real types of the classes they subclass). */
+struct MqXtClassRec { CoreClassPart core_class; char parts[512]; };
+
+struct MqClassRegistrar {
+  MqClassRegistrar (MqClass *c, Cardinal widget_size) { mq_register_class (c, widget_size); }
+};
+
+/* Instance sizes for the Xt parts of our widgets, by kind */
+Cardinal mq_instance_size (unsigned kind);
+/* the size of a Motif class's real instance record (xm_records.c), 0 if none */
+extern "C" unsigned mq_motif_record_size (const char *class_name);
+/* Motif's base class extension with the fast subclass bits (xm_misc.cpp) */
+extern "C" void mq_motif_class_extension (WidgetClass c);
+extern "C" void mq_sync_label_record (Widget w, XmString label, unsigned char label_type, XmRenderTable font,
+                                      unsigned char alignment, Pixmap pixmap, Pixmap pixmap_insen,
+                                      Dimension margin_width, Dimension margin_height, Boolean recompute_size);
+extern "C" void mq_free_label_record (Widget w);
+
+#define MQ_DEFINE_CLASS_XT(var, rec, xtrec, name, super, kind, create, apply, fetch, place, unplace, relayout, init) \
+  MqClass rec = { name, super, kind, create, apply, fetch, place, unplace, relayout, init, (WidgetClass) &xtrec, \
+                  nullptr, nullptr, nullptr, nullptr, nullptr, false }; \
+  WidgetClass var = (WidgetClass) &xtrec; \
+  static MqClassRegistrar rec##_registrar (&rec, mq_instance_size (kind));
+#define MQ_DEFINE_CLASS(var, rec, name, super, kind, create, apply, fetch, place, unplace, relayout, init) \
+  MqXtClassRec rec##_xt; \
+  MQ_DEFINE_CLASS_XT (var, rec, rec##_xt, name, super, kind, create, apply, fetch, place, unplace, relayout, init)
+
+/* ---------------------------------------------------------------- widgets */
+class MqBridge;
+
+struct EventHandlerRec { EventMask mask; Boolean nonmaskable; XtEventHandler proc; XtPointer closure; };
+
+/* Our data for a widget. It sits just before the widget's Xt instance record
+ * (CorePart first, then the class's parts), which is what a Widget points to;
+ * R(w) gets from one to the other. */
+struct MqRec {
+  MqClass *klass = nullptr;
+  QByteArray name;
+  Widget parent = nullptr;
+  QPointer<QObject> obj;        /* QWidget, or QAction for menu entries */
+  QPointer<QWidget> inner;      /* the interesting part of a composite Qt widget */
+  QPointer<QWidget> content;    /* managers: where children's QWidgets live */
+  QHash<QByteArray, XtArgVal> res;                  /* resources explicitly set (owned copies) */
+  QHash<QByteArray, QList<XtCallbackRec>> callbacks;
+  QList<Widget> children;       /* normal children, creation order */
+  QList<Widget> popups;         /* popup children (shells) */
+  bool managed = false, realized = false, destroying = false, sensitive = true, is_popup = false;
+  bool popped_up = false;
+  QList<EventHandlerRec> handlers;
+  struct _TranslationData *translations = nullptr;
+  MqBridge *bridge = nullptr;
+  Window window = 0;            /* X window id used by Xlib drawing */
+  void *ext = nullptr;          /* class-specific C++ data (owned via ext_free) */
+  void (*ext_free) (void *) = nullptr;
+  QByteArray scratch;
+  QList<QPair<QByteArray, XtArgVal>> deferred;   /* set_other args given at creation */
+  QVector<Widget> xt_children, xt_popups;        /* arrays behind composite.children / core.popup_list */
+  QHash<QByteArray, QVector<XtCallbackRec>> xt_callback_arrays;   /* XtCallbackList fields of foreign widgets */
+};
+
 enum { MQ_HEADER = (sizeof (MqRec) + 31) & ~31 };
 inline MqRec *R (Widget w) { return reinterpret_cast<MqRec *> (reinterpret_cast<char *> (w) - MQ_HEADER); }
-Widget mq_alloc_widget (MqClass *klass); void mq_free_widget (Widget w); void mq_sync_core (Widget w); void mq_sync_children (Widget w);
-class MqBridge : public QObject { public: explicit MqBridge (Widget w) : widget (w) {} Widget widget; bool eventFilter (QObject *, QEvent *) override; };
+Widget mq_alloc_widget (MqClass *klass);
+void mq_free_widget (Widget w);
+void mq_sync_core (Widget w);           /* core.x/y/width/height ... from Qt and our state */
+void mq_sync_children (Widget w);       /* composite.children, core.popup_list */
 
-extern XtAppContext mq_app; extern Display *mq_display; void mq_ensure_app (int *argc = nullptr, char **argv = nullptr);
-QWidget *mq_qw (Widget w); QAction *mq_action (Widget w); QWidget *mq_content (Widget w);
+class MqBridge : public QObject {
+public:
+  explicit MqBridge (Widget w) : widget (w) {}
+  Widget widget;
+  bool eventFilter (QObject *o, QEvent *e) override;
+};
+
+/* ---------------------------------------------------------------- core helpers */
+extern XtAppContext mq_app;
+extern Display *mq_display;
+void mq_ensure_app (int *argc = nullptr, char **argv = nullptr);
+
+QWidget *mq_qw (Widget w);                     /* the QWidget (nullptr for menu actions) */
+QAction *mq_action (Widget w);                 /* the QAction for menu entries */
+QWidget *mq_content (Widget w);                /* where children go */
 template <class T> T *mq_q (Widget w) { return w ? qobject_cast<T *> (R (w)->obj.data ()) : nullptr; }
 template <class T> T *mq_inner (Widget w) { return w ? qobject_cast<T *> (R (w)->inner.data ()) : nullptr; }
-Widget mq_from_qobject (QObject *o); bool mq_is (Widget w, WidgetClass c); bool mq_kind (Widget w, unsigned kind); Widget mq_shell_of (Widget w); bool mq_in_menu (Widget w); unsigned char mq_menu_type (Widget w);
-const ResDef *mq_find_res (Widget w, const char *name, bool *constraint = nullptr); XtArgVal mq_get (Widget w, const char *name); int mq_geti (Widget w, const char *name); bool mq_getb (Widget w, const char *name); QString mq_gets (Widget w, const char *name); bool mq_isset (Widget w, const char *name); void mq_set (Widget w, const char *name, XtArgVal v); void mq_store (Widget w, const ResDef *def, XtArgVal v); bool mq_convert (Widget w, const ResDef *def, const char *str, XtArgVal *out); const char *mq_lookup_db (Widget w, const char *name, const char *rclass); void mq_db_add_line (const char *line); int mq_enum_value (const char *name, bool *ok);
-void mq_call (Widget w, const char *callback, XtPointer call_data); bool mq_has_callbacks (Widget w, const char *callback);
-void mq_place_default (Widget parent, Widget child); void mq_unplace_default (Widget parent, Widget child); void mq_sync_visible (Widget w); void mq_apply_size (Widget w); void mq_popup_shell (Widget shell, bool up); void mq_relayout (Widget manager);
-QString mq_xmstring_text (XmString s); XmString mq_xmstring_from (const QString &text); QString mq_mnemonic_text (const QString &text, KeySym mnemonic); QFont mq_fontlist_font (XmFontList fl, bool *ok); XmFontList mq_fontlist_from_string (const char *spec);
-bool mq_qt_to_xevent (Widget w, QEvent *e, XEvent *xe); void mq_dispatch_handlers (Widget w, XEvent *xe, bool *consumed); void mq_run_translations (Widget w, XEvent *xe); XEvent *mq_current_event (); struct MqEventScope { XEvent *prev; MqEventScope (XEvent *e); ~MqEventScope (); };
-Window mq_window_for (Widget w); Widget mq_widget_for_window (Window win); class QImage *mq_window_image (Window win, bool create = true); void mq_window_resize (Window win, int w, int h); void mq_window_flush (Window win); unsigned long mq_pixel (const QColor &c); QColor mq_color (unsigned long pixel); QPixmap mq_pixmap_qt (Pixmap p);
-void mq_rowcolumn_rebuild_menu (Widget menu); void mq_option_menu_sync (Widget option);
-extern MqClass object_rec, rectobj_rec, core_rec, composite_rec, constraint_rec; extern MqClass mq_shell_rec, mq_toplevel_shell_rec, mq_application_shell_rec, mq_dialog_shell_rec, mq_menu_shell_rec, mq_transient_shell_rec;
-void *mq_real_symbol (const char *name); extern Screen *mq_screen_ptr;
-#define MQ_FWD(fn, dpy, ...) do { if ((dpy) && (Display *) (dpy) != mq_display) { static auto real_ = (decltype (&fn)) mq_real_symbol (#fn); if (real_) return real_ (__VA_ARGS__); } } while (0)
-#define MQ_FWD_SCREEN(fn, scr, ...) do { if ((scr) && (scr) != mq_screen_ptr) { static auto real_ = (decltype (&fn)) mq_real_symbol (#fn); if (real_) return real_ (__VA_ARGS__); } } while (0)
-void mq_add_converter (const char *from, const char *to, XtTypeConverter conv, XtConverter old, XtConvertArgList args, Cardinal n); bool mq_program_convert (Widget w, const char *from_type, XrmValue *from, const char *to_type, XrmValue *to);
-QString mq_mb_decode (const char *s, int len = -1); QByteArray mq_mb_encode (const QString &s); QString mq_decode_mixed (const QByteArray &b); QByteArray mq_default_font_name (); uint mq_keysym_ucs (KeySym k); uint mq_keysym_text (KeySym k, unsigned state);
-class QInputMethodEvent; bool mq_im_query (QWidget *qw, Qt::InputMethodQuery q, QVariant *out); void mq_im_event (QWidget *qw, QInputMethodEvent *e); void mq_im_enable (QWidget *qw);
-QFont mq_font_from_xlfd (const QString &name, bool *ok); QFont mq_font_for (Font fid); Pixmap mq_pixmap_from_image (const QImage &img); Pixmap mq_bitmap_from_image (const QImage &img);
-QFont mq_widget_font (Widget w, const char *which = nullptr); void mq_apply_common (Widget w, const QByteArray &res); QString mq_label_text (Widget w); QKeySequence mq_accelerator_keys (const char *accel); XmString mq_label_xmstring_default (Widget w); bool mq_class_is (Widget w, const char *class_name); QObject *mq_canvas_create (Widget w);
-QObject *mq_xaw_create (Widget w); bool mq_xaw_native (Widget w); void mq_xaw_sync (Widget w); void mq_toggle_set (Widget w, bool on, bool notify);
+Widget mq_from_qobject (QObject *o);
+bool mq_is (Widget w, WidgetClass c);          /* XtIsSubclass */
+bool mq_kind (Widget w, unsigned kind);
+Widget mq_shell_of (Widget w);
+bool mq_in_menu (Widget w);                    /* parent is a pulldown/popup/menubar row column */
+unsigned char mq_menu_type (Widget w);         /* XmNrowColumnType of a RowColumn */
+
+/* resources */
+const ResDef *mq_find_res (Widget w, const char *name, bool *constraint = nullptr);
+XtArgVal mq_get (Widget w, const char *name);  /* stored value or default (raw, not copied) */
+int mq_geti (Widget w, const char *name);
+bool mq_getb (Widget w, const char *name);
+QString mq_gets (Widget w, const char *name);  /* XmString or String resource as text */
+bool mq_isset (Widget w, const char *name);
+void mq_set (Widget w, const char *name, XtArgVal v);          /* store + apply, like XtSetValues */
+void mq_store (Widget w, const ResDef *def, XtArgVal v);
+bool mq_convert (Widget w, const ResDef *def, const char *str, XtArgVal *out);
+const char *mq_lookup_db (Widget w, const char *name, const char *rclass);
+void mq_db_add_line (const char *line);
+int mq_enum_value (const char *name, bool *ok);
+
+/* callbacks */
+void mq_call (Widget w, const char *callback, XtPointer call_data);
+bool mq_has_callbacks (Widget w, const char *callback);
+
+/* geometry / visibility */
+void mq_place_default (Widget parent, Widget child);
+void mq_unplace_default (Widget parent, Widget child);
+void mq_sync_visible (Widget w);
+void mq_apply_size (Widget w);
+void mq_popup_shell (Widget shell, bool up);
+void mq_relayout (Widget manager);
+
+/* XmString */
+QString mq_xmstring_text (XmString s);
+XmString mq_xmstring_from (const QString &text);
+QString mq_mnemonic_text (const QString &text, KeySym mnemonic);   /* "File" + 'F' -> "&File" */
+QFont mq_fontlist_font (XmFontList fl, bool *ok);
+XmFontList mq_fontlist_from_string (const char *spec);
+
+/* events */
+bool mq_qt_to_xevent (Widget w, QEvent *e, XEvent *xe);
+void mq_dispatch_handlers (Widget w, XEvent *xe, bool *consumed);
+void mq_run_translations (Widget w, XEvent *xe);
+XEvent *mq_current_event ();                   /* event that triggered the running callback */
+struct MqEventScope { XEvent *prev; MqEventScope (XEvent *e); ~MqEventScope (); };
+
+/* Xlib backing store for drawing areas */
+Window mq_window_for (Widget w);
+Widget mq_widget_for_window (Window win);
+class QImage *mq_window_image (Window win, bool create = true);
+void mq_window_resize (Window win, int w, int h);
+void mq_window_flush (Window win);
+unsigned long mq_pixel (const QColor &c);
+QColor mq_color (unsigned long pixel);
+QPixmap mq_pixmap_qt (Pixmap p);
+/* native Qt faces for Athena's Command, Toggle and Label (xaw_qt.cpp; not
+ * wired into the foreign class path yet) */
+QObject *mq_xaw_create (Widget w);
+bool mq_xaw_native (Widget w);
+void mq_xaw_sync (Widget w);
+
+/* menus */
+void mq_rowcolumn_rebuild_menu (Widget menu);
+void mq_option_menu_sync (Widget option);
+
+/* class records the implementation files share */
+extern MqClass object_rec, rectobj_rec, core_rec, composite_rec, constraint_rec;
+extern MqClass mq_shell_rec, mq_toplevel_shell_rec, mq_application_shell_rec, mq_dialog_shell_rec,
+  mq_menu_shell_rec, mq_transient_shell_rec;
+
+/* Forwarding to the system libX11: Qt's xcb platform and libGL call Xlib with
+ * real displays, and those calls can bind to this library. Each Xlib entry
+ * point starts with MQ_FWD, which hands calls for displays that are not ours
+ * to the next definition of the function (dlsym RTLD_NEXT). */
+void *mq_real_symbol (const char *name);
+extern Screen *mq_screen_ptr;
+#define MQ_FWD(fn, dpy, ...) \
+  do { if ((dpy) && (Display *) (dpy) != mq_display) { \
+    static auto real_ = (decltype (&fn)) mq_real_symbol (#fn); \
+    if (real_) return real_ (__VA_ARGS__); } } while (0)
+#define MQ_FWD_SCREEN(fn, scr, ...) \
+  do { if ((scr) && (scr) != mq_screen_ptr) { \
+    static auto real_ = (decltype (&fn)) mq_real_symbol (#fn); \
+    if (real_) return real_ (__VA_ARGS__); } } while (0)
+
+/* converters a program registered (xt_resources.cpp) */
+void mq_add_converter (const char *from, const char *to, XtTypeConverter conv, XtConverter old, XtConvertArgList args, Cardinal n);
+bool mq_program_convert (Widget w, const char *from_type, XrmValue *from, const char *to_type, XrmValue *to);
+
+/* program text <-> QString. Bytes that are valid UTF-8 are UTF-8; others are
+ * in the locale's 8-bit codeset (Latin-1 in the C locale): DDD's sources and
+ * many old programs are Latin-1 whatever the locale (xlib.cpp) */
+QString mq_mb_decode (const char *s, int len = -1);
+QByteArray mq_mb_encode (const QString &s);
+QString mq_decode_mixed (const QByteArray &b);
+/* the font XtDefaultFont names (xt_resources.cpp) */
+QByteArray mq_default_font_name ();
+/* the character a keysym types (0 if none), and with the modifiers of an
+ * event applied (Control) (xlib.cpp) */
+uint mq_keysym_ucs (KeySym k);
+uint mq_keysym_text (KeySym k, unsigned state);
+/* input methods for program widgets (xim.cpp) */
+class QInputMethodEvent;
+bool mq_im_query (QWidget *qw, Qt::InputMethodQuery q, QVariant *out);
+void mq_im_event (QWidget *qw, QInputMethodEvent *e);
+void mq_im_enable (QWidget *qw);
+
+/* Xlib side (xlib.cpp) */
+QFont mq_font_from_xlfd (const QString &name, bool *ok);
+QFont mq_font_for (Font fid);
+Pixmap mq_pixmap_from_image (const QImage &img);
+Pixmap mq_bitmap_from_image (const QImage &img);   /* depth 1: white is 1 */
+
+/* widget-layer helpers (xm_*.cpp) */
+QFont mq_widget_font (Widget w, const char *which = nullptr);   /* which: XmNbuttonFontList etc. */
+void mq_apply_common (Widget w, const QByteArray &res);         /* colours, font, tool tip, traversal */
+QString mq_label_text (Widget w);                               /* labelString, default: widget name */
+QKeySequence mq_accelerator_keys (const char *accel);           /* "Ctrl<Key>q" -> Ctrl+Q */
+XmString mq_label_xmstring_default (Widget w);
+bool mq_class_is (Widget w, const char *class_name);
+QObject *mq_canvas_create (Widget w);
+void mq_toggle_set (Widget w, bool on, bool notify);
+
 #define MQ_WARN_ONCE(...) do { static bool once = false; if (!once) { once = true; qWarning (__VA_ARGS__); } } while (0)
-template <class T> T *mq_ext (Widget w) { MqRec *r = R (w); if (!r->ext) { r->ext = new T; r->ext_free = [] (void *p) { delete static_cast<T *> (p); }; } return static_cast<T *> (r->ext); }
+
+/* Per-widget C++ extension data */
+template <class T> T *mq_ext (Widget w)
+{
+  MqRec *r = R (w);
+  if (!r->ext) { r->ext = new T; r->ext_free = [] (void *p) { delete static_cast<T *> (p); }; }
+  return static_cast<T *> (r->ext);
+}
+
 #endif
