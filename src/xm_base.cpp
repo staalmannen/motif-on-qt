@@ -242,7 +242,9 @@ protected:
     Window win = mq_window_for (w);
     if (win) mq_window_resize (win, e->size ().width (), e->size ().height ());
     exposed = false;
-    if (R (w)->klass->foreign) {
+    /* a shell keeps its X size until it is realized (Qt gives a new window
+     * a size of its own; Athena's SimpleMenu sizes itself from 0) */
+    if (R (w)->klass->foreign && (XtIsRealized (w) || !(R (w)->klass->kind & K_SHELL))) {
       w->core.width = e->size ().width ();
       w->core.height = e->size ().height ();
       /* Qt's layouts can pass through transient sizes (a hidden window laid
@@ -297,6 +299,9 @@ protected:
       img = mq_window_image (win, true);
     }
     QPainter p (this);
+    /* Athena widgets painted with the Qt style (their Xlib drawing above
+     * still keeps the backing image) */
+    if (R (w)->klass->foreign && mq_xaw_paint (w, this, p)) return;
     if (img) {
       qreal d = img->devicePixelRatio ();
       QRectF src (pe->rect ().x () * d, pe->rect ().y () * d, pe->rect ().width () * d, pe->rect ().height () * d);

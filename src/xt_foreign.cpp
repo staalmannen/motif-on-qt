@@ -458,6 +458,20 @@ XtGeometryResult mq_make_geometry_request (Widget w, XtWidgetGeometry *req, XtWi
   Widget p = R (w)->parent;
   bool query = req->request_mode & XtCWQueryOnly;
   if (p && R (p)->klass->foreign && R (p)->klass->place == foreign_place) {
+    /* Xt: an unmanaged widget, or one whose parent is not realized yet,
+     * gets what it asks for without the geometry manager (Athena's Form
+     * refuses children that are not resizable, but sizes them at start) */
+    if (!R (w)->managed || !R (p)->realized) {
+      if (!query) {
+        if (req->request_mode & CWX) w->core.x = req->x;
+        if (req->request_mode & CWY) w->core.y = req->y;
+        if (req->request_mode & CWWidth) w->core.width = req->width;
+        if (req->request_mode & CWHeight) w->core.height = req->height;
+        if (req->request_mode & CWBorderWidth) w->core.border_width = req->border_width;
+        apply_geometry (w);
+      }
+      return XtGeometryYes;
+    }
     XtGeometryHandler gm = reinterpret_cast<CompositeWidgetClass> (p->core.widget_class)->composite_class.geometry_manager;
     if (!gm) return XtGeometryNo;
     XtWidgetGeometry dummy;
@@ -477,9 +491,10 @@ XtGeometryResult mq_make_geometry_request (Widget w, XtWidgetGeometry *req, XtWi
     if (req->request_mode & CWHeight) w->core.height = req->height;
     if (req->request_mode & CWBorderWidth) w->core.border_width = req->border_width;
     if (QWidget *q = mq_qw (w)) {
-      if (R (w)->klass->foreign) q->updateGeometry ();
-      else if (!(R (w)->klass->kind & K_SHELL)) q->setMinimumSize (w->core.width, w->core.height);
-      else q->resize (w->core.width, w->core.height);
+      /* a shell's window takes the size (Athena's SimpleMenu sizes itself) */
+      if (R (w)->klass->kind & K_SHELL) q->resize (qMax<int> (1, w->core.width), qMax<int> (1, w->core.height));
+      else if (R (w)->klass->foreign) q->updateGeometry ();
+      else q->setMinimumSize (w->core.width, w->core.height);
     }
   }
   return XtGeometryYes;

@@ -73,16 +73,19 @@ macros of `XmP.h`; both work as with libXt and libXm.
 ## Athena widgets
 
 The Athena widgets are libXaw 1.0.16's own sources, unmodified, running on
-our Xt and drawing through our Xlib, so they look like Athena. Programs link
-them with `-lXaw7` (or `-lXaw`, pkg-config `xaw7`), as with real X. Box,
-Command, Panner and AsciiText with real libXaw on X11 (left) and on Qt
-(right):
+our Xt and drawing through our Xlib. Programs link them with `-lXaw7` (or
+`-lXaw`, pkg-config `xaw7`), as with real X.
 
-| libXaw on X11 | the same source on Qt |
-| --- | --- |
-| ![](docs/screenshots/athena-xaw.png) | ![](docs/screenshots/athena-qt.png) |
+Label, Command, Toggle, MenuButton, Repeater, Scrollbar and the SimpleMenu
+popup keep all of libXaw's behaviour (translations, actions, callbacks,
+sizes, radio groups) but are painted with the Qt style, so they follow the
+desktop theme. With `MOTIFQT_XAW_CLASSIC=1` they look like Athena (left;
+right the default; the menu of "Options" is open, "Green" is set):
 
-Tooltips (`XtNtip`) are Qt tooltips.
+![](docs/screenshots/athena-faces.png)
+
+A program's own subclass that draws itself keeps its drawing. Tooltips
+(`XtNtip`) are Qt tooltips.
 
 ## Input methods
 
@@ -174,6 +177,8 @@ distribution packages.
 
 ## Environment variables
 
+* `MOTIFQT_XAW_CLASSIC=1` shows the Athena widgets as libXaw draws them
+  instead of with the Qt style.
 * `MOTIFQT_DESKTOP_FONT=1` makes `XtDefaultFont` (the font of Athena and
   plain Xt programs that set none) the desktop's font instead of X's
   `fixed`. Xt's default colours (`XtDefaultBackground`,

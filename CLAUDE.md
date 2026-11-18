@@ -26,7 +26,9 @@ quit"` (see docs/testing.md).
 - `src/xaw/`, `src/xmu/` genuine libXaw 1.0.16 / libXmu 1.1.3 sources (MIT),
   unmodified, run as foreign classes on our Xt (`src/xaw/xaw_tip.c` and
   `config.h` are ours; Vendor.c is built with its VendorShell renamed);
-  `src/xpm.cpp` the Xpm API; `src/xim.cpp` input methods (XIM, XmIm)
+  `src/xpm.cpp` the Xpm API; `src/xim.cpp` input methods (XIM, XmIm);
+  `src/xaw_qt.cpp` Qt style faces for Athena's buttons, labels, scroll bars
+  and menus (behaviour stays libXaw's)
 - `examples/` Motif's own demos, unmodified; `tests/` our regression programs
 
 ## Conventions

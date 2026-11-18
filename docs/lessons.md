@@ -115,6 +115,19 @@ Things that cost time once; check here before debugging something similar.
   it XawIm falls back to XLookupString and widens bytes to wide characters
   one by one.
 - A test's check must run before MOTIFQT_AUTOQUIT, or it passes unseen.
+- Xt grants geometry requests of unmanaged widgets, or of children of an
+  unrealized parent, without the geometry manager: Athena's Form refuses
+  non-resizable children, so Boxes inside Forms stayed 4x4.
+- Core's width/height arguments must be in the record before a program
+  class's initialize: Athena's Label sizes itself to its text only when no
+  width was given.
+- Actions are looked up in the widget's class, its superclasses, then the
+  application: Command, Toggle, Scrollbar and SmeBSB each define "set".
+- A popup shell is realized by XtPopup, not with its parent's tree: run
+  its change_managed there (SimpleMenu sizes itself in it); an unrealized
+  shell's size is 0, whatever size Qt gives the new window.
+- Xaw's Command swaps its foreground and background while set; QPalette's
+  setColor (role, c) sets every colour group, the disabled one too.
 - HiDPI: X's 1-pixel line covers [y, y+1); Qt centres a 1-unit pen on y, so
   on a scaled image it straddles two X pixels and a program that erases it
   by clearing its pixels (NEdit's cursor) leaves a sliver. Shift odd-width

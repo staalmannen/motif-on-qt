@@ -103,6 +103,21 @@ benefit too - `core.managed` set by XtManageChild, `get_values_hook`,
 `src/xpm.cpp` reads XPM data, buffers and files into pixmaps, XImages and
 XpmImage.
 
+## Athena faces (xaw_qt.cpp)
+
+MqCanvas's paint event asks `mq_xaw_paint` first: for a widget whose class
+is (or derives without its own expose from) Athena's Label, Command,
+Toggle, MenuButton, Repeater, Scrollbar or SimpleMenu, the widget is
+painted with the Qt style from the state in the Xaw record - label, font,
+justification, `command.set` (Command swaps its colours while set; the
+face swaps them back), `highlighted`, the scroll bar's top/shown (the
+style's bar is stretched so its track is the widget, without arrows), the
+menu's `entry_set`. Xaw still draws into the backing image, and every
+drawing asks for a repaint, so the face follows each state change. The
+class records are weak references (Motif-only programs do not link
+Athena). A SimpleMenu (a program's override shell with its own expose) is
+created as a canvas window, and as a Qt popup when popped up with a grab.
+
 ## Input methods (xim.cpp)
 
 Program widgets (MqCanvas) set Qt::WA_InputMethodEnabled when they read

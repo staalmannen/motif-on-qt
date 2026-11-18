@@ -109,6 +109,8 @@ Notebook, TabStack, Column ...), PseudoColor colormap tricks.
 
 Environment variables, all optional:
 
+- `MOTIFQT_XAW_CLASSIC=1`: the Athena widgets look like Athena; by default
+  their buttons, labels, scroll bars and menus are painted with the Qt style.
 - `MOTIFQT_DESKTOP_FONT=1`: Athena and plain Xt programs use the desktop's
   font where they ask for `XtDefaultFont` (X's `fixed` otherwise). Their
   default colours follow the desktop's palette in any case, dark themes
