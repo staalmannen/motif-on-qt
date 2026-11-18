@@ -432,7 +432,14 @@ static void call_action (Widget w, const ActionCall &a, XEvent *xe)
   for (const QByteArray &p : a.params) params << const_cast<char *> (p.constData ());
   Cardinal n = params.size ();
   for (auto &h : s_action_hooks) h.first (w, h.second, const_cast<char *> (a.name.constData ()), xe, params.data (), &n);
-  XtActionProc proc = action_table ().value (a.name);
+  /* as Xt: the widget's class and its superclasses first, then the
+   * application's actions (Athena's Command, Toggle, Scrollbar and SmeBSB
+   * each have their own "set") */
+  XtActionProc proc = nullptr;
+  for (WidgetClass c = w->core.widget_class; c && !proc; c = c->core_class.superclass)
+    for (Cardinal i = 0; c->core_class.actions && i < c->core_class.num_actions; i++)
+      if (c->core_class.actions[i].string && a.name == c->core_class.actions[i].string) { proc = c->core_class.actions[i].proc; break; }
+  if (!proc) proc = action_table ().value (a.name);
   if (proc) proc (w, xe, params.data (), &n);
   else mq_builtin_action (w, a.name, xe, params.data (), &n);
 }

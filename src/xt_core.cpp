@@ -340,7 +340,8 @@ void mq_sync_core (Widget w)
       QSize hint = qw->sizeHint ().expandedTo (qw->minimumSize ());
       if (hint.isValid ()) { c.width = hint.width (); c.height = hint.height (); }
     }
-  } else if (foreign_geometry && (!r->klass->foreign || r->klass->create != mq_canvas_create) && (c.width == 0 || c.height == 0)) {
+  } else if (foreign_geometry && (!r->klass->foreign || r->klass->create != mq_canvas_create) &&
+             !(r->klass->foreign && (r->klass->kind & K_SHELL)) && (c.width == 0 || c.height == 0)) {
     /* our widget in a program's composite, or a program's subclass of one of
      * our Qt widgets (Xlt's BubbleButton): what our class's initialize would
      * have set, as Motif's Label does when no size was given */
@@ -546,6 +547,15 @@ void MqDialogWidget::closeEvent (QCloseEvent *e) { shell_close_request (shell, e
 static QObject *shell_create (Widget w)
 {
   QWidget *win;
+  /* a program's override shell that draws itself (Athena's SimpleMenu
+   * draws its entries): a drawing canvas as a frameless window */
+  XtExposeProc expose = w->core.widget_class->core_class.expose;
+  if (R (w)->klass->foreign && expose && expose != own_expose && mq_is (w, overrideShellWidgetClass)) {
+    auto *c = static_cast<QWidget *> (mq_canvas_create (w));
+    c->setWindowFlags (Qt::ToolTip | Qt::FramelessWindowHint);
+    c->setProperty ("_mq_drawn_shell", true);
+    return c;
+  }
   if (mq_is (w, xmDialogShellWidgetClass)) {
     auto *d = new MqDialogWidget;
     d->shell = w;
@@ -648,7 +658,10 @@ void mq_popup_shell (Widget shell, bool up)
         else if (mq_gets (shell, XmNtitle).isEmpty ()) win->setWindowTitle (QString::fromLocal8Bit (R (box)->name));
       }
     }
-    size_to_content (win);
+    /* a program's shell class sizes itself (Athena's SimpleMenu: its entries
+     * are objects, not Qt widgets) */
+    if (R (shell)->klass->foreign && shell->core.width && shell->core.height) win->resize (shell->core.width, shell->core.height);
+    else size_to_content (win);
     mq_apply_size (shell);
     /* center transient windows over their owner, like mwm does for dialogs */
     Widget owner = R (shell)->parent ? mq_shell_of (R (shell)->parent) : nullptr;
@@ -838,6 +851,16 @@ static Widget create_widget (const char *name, WidgetClass xt_class, Widget pare
   R (w)->deferred.clear ();
   mq_sync_core (w);
   mq_sync_children (w);
+  if (klass->foreign && (klass->kind & (K_WIDGET | K_GADGET))) {
+    /* Core's geometry from the arguments and resources, before the class's
+     * initialize: Athena's Label sizes itself to its text only when no
+     * width was given */
+    if (mq_isset (w, XmNwidth)) w->core.width = (Dimension) mq_geti (w, XmNwidth);
+    if (mq_isset (w, XmNheight)) w->core.height = (Dimension) mq_geti (w, XmNheight);
+    if (mq_isset (w, XmNx)) w->core.x = (Position) mq_geti (w, XmNx);
+    if (mq_isset (w, XmNy)) w->core.y = (Position) mq_geti (w, XmNy);
+    if (mq_isset (w, XmNborderWidth)) w->core.border_width = (Dimension) mq_geti (w, XmNborderWidth);
+  }
   if (klass->foreign) mq_foreign_initialize (w, args, n);
   if (parent && !popup && R (parent)->klass->foreign) mq_foreign_constraint_initialize (w, args, n);
   if ((klass->kind & K_SHELL) && is_vendor_shell (klass) && &xawvendorShellExtWidgetClass && xawvendorShellExtWidgetClass)
@@ -1098,8 +1121,20 @@ void XtUnrealizeWidget (Widget w)
 void XtPopup (Widget shell, XtGrabKind grab)
 {
   if (!shell) return;
+  /* a popup shell is realized here, not with its parent's tree: lay out
+   * its children first, as XtRealizeWidget does (Athena's SimpleMenu sizes
+   * itself in change_managed) */
+  if (!R (shell)->realized) change_managed_rec (shell);
   realize_rec (shell);
-  if (QWidget *win = mq_qw (shell)) win->setWindowModality (grab == XtGrabExclusive ? Qt::ApplicationModal : Qt::NonModal);
+  if (QWidget *win = mq_qw (shell)) {
+    /* a menu that draws itself, popped up with a grab: a Qt popup, which
+     * gets the pointer as X's grab gives it (press on the menu button,
+     * release on an entry) */
+    if (win->property ("_mq_drawn_shell").toBool ()) {
+      Qt::WindowFlags f = (grab == XtGrabNone ? Qt::ToolTip : Qt::Popup) | Qt::FramelessWindowHint;
+      if (win->windowFlags () != f) win->setWindowFlags (f);
+    } else win->setWindowModality (grab == XtGrabExclusive ? Qt::ApplicationModal : Qt::NonModal);
+  }
   mq_popup_shell (shell, true);
 }
 

@@ -2344,6 +2344,8 @@ Bool XDirectionalDependentDrawing (XFontSet) { return False; }
 Bool XContextualDrawing (XFontSet) { return False; }
 }
 
+QFont mq_fontset_qfont (XFontSet set) { return mq_font_for (set ? set->fs->fid : 0); }
+
 static QString wc_string (const wchar_t *s, int len) { return QString::fromWCharArray (s, len); }
 
 static int set_width (XFontSet set, const QString &t) { return x_text_width (mq_font_for (set ? set->fs->fid : 0), t); }

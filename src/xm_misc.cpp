@@ -80,6 +80,26 @@ void mq_builtin_action (Widget w, const QByteArray &name, XEvent *xe, String *pa
       for (Widget p = w; p; p = R (p)->parent) if (mq_has_callbacks (p, XmNhelpCallback)) { mq_call (p, XmNhelpCallback, &cs); break; }
     }
     /* the Qt widgets already behave this way */
+  } else if (name == "XtMenuPopup" || name == "MenuPopup") {
+    /* Xt's own: pop up the named shell, a popup child of this widget or of
+     * an ancestor; spring-loaded (with the pointer) on a button press */
+    if (*n < 1) return;
+    Widget shell = nullptr;
+    for (Widget p = w; p && !shell; p = R (p)->parent)
+      for (Widget c : R (p)->popups)
+        if (R (c)->name == params[0]) { shell = c; break; }
+    if (!shell) { qWarning ("Motif on Qt: XtMenuPopup: no popup shell \"%s\"", params[0]); return; }
+    if (xe && xe->type == ButtonPress) XtPopupSpringLoaded (shell);
+    else XtPopup (shell, XtGrabNonexclusive);
+  } else if (name == "XtMenuPopdown" || name == "MenuPopdown") {
+    /* the named popup shell, or the shell this widget is in */
+    Widget shell = nullptr;
+    if (*n >= 1) {
+      for (Widget p = w; p && !shell; p = R (p)->parent)
+        for (Widget c : R (p)->popups)
+          if (R (c)->name == params[0]) { shell = c; break; }
+    } else shell = mq_shell_of (w);
+    if (shell) XtPopdown (shell);
   } else {
     qWarning ("Motif on Qt: action \"%s\" is not available", name.constData ());
   }

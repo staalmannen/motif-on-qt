@@ -34,6 +34,9 @@ motif_program (inputmethod ${CMAKE_SOURCE_DIR}/tests/inputmethod.c)
 target_link_libraries (inputmethod PRIVATE Xaw7 Xmu)
 # its own check exits at 1.5 s, after the scripted commits
 set_tests_properties (inputmethod PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;MOTIFQT_AUTOQUIT=10000")
+motif_program (xawfaces ${CMAKE_SOURCE_DIR}/tests/xawfaces.c)
+target_link_libraries (xawfaces PRIVATE Xaw7 Xmu)
+set_tests_properties (xawfaces PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;MOTIFQT_AUTOQUIT=10000")
 
 # The headers compile as C++17 (C++ Motif programs such as xpdf)
 add_executable (cxx-headers ${CMAKE_SOURCE_DIR}/tests/cxx-headers.cpp)

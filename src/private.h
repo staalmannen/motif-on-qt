@@ -272,11 +272,11 @@ void mq_window_flush (Window win);
 unsigned long mq_pixel (const QColor &c);
 QColor mq_color (unsigned long pixel);
 QPixmap mq_pixmap_qt (Pixmap p);
-/* native Qt faces for Athena's Command, Toggle and Label (xaw_qt.cpp; not
- * wired into the foreign class path yet) */
-QObject *mq_xaw_create (Widget w);
-bool mq_xaw_native (Widget w);
-void mq_xaw_sync (Widget w);
+/* Qt style faces for Athena's Label, Command, Toggle, MenuButton, Repeater
+ * and Scrollbar: paints the widget, false if it keeps Xaw's drawing (xaw_qt.cpp) */
+bool mq_xaw_paint (Widget w, QWidget *qw, QPainter &p);
+/* the Qt font of an X font set (xlib.cpp) */
+QFont mq_fontset_qfont (XFontSet set);
 
 /* menus */
 void mq_rowcolumn_rebuild_menu (Widget menu);
