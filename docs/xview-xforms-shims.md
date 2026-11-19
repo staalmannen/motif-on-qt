@@ -77,8 +77,14 @@ XView is **not** Xt-based. It provides an object-oriented C API with opaque hand
 packages, and attribute lists (`xv_create`, `xv_set`, `xv_get`, …). The Notifier replaces
 the Xt main loop. Graphics primitives live in libolgx.
 
-Sources are available (OpenWindows-derived trees; modern ports such as ElCoyote27/XView).
-License is permissive. Scaffolding lives under `src/xview/`.
+**Implementation started (thin shim, not a source import).** Because the toolkit is
+large and not Xt-based, the primary path is Motif-style: public C calls over Qt.
+`include/xview/xview.h`, `src/xview/xv_api.cpp` and `src/xview/olgx.cpp` cover FRAME,
+PANEL (button, message, text, slider), CANVAS, MENU/MENUITEM, SCROLLBAR, `xv_notice`,
+and the common olgx drawing calls (box, button, choice, text, scrollbar, menu mark)
+on QPainter. Build with `cmake --build build --target xview-hello`. This is a
+source-level subset (our attribute numbers), not the Sun ABI. A real XView tree can
+still be kept aside as a behaviour oracle; it is not linked into the library.
 
 ### Core packages and suggested Qt mappings
 
