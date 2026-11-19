@@ -1,0 +1,63 @@
+# XForms (Forms Library) — Athena-style import for motif-on-qt
+
+This directory holds (or will hold) the genuine XForms 1.2.4 library sources,
+imported the same way libXaw lives under `src/xaw/`.
+
+## Status (transition)
+
+- **Goal**: compile the original XForms sources against motif-on-qt’s Xlib-on-Qt
+  (and eventually thin-shim the public API over Qt widgets, see
+  `docs/xview-xforms-shims.md`).
+- **Current**: scaffolding + minimal `config.h`. Drop the official sources here
+  and wire them into the top-level CMakeLists when ready.
+
+## How to import the sources
+
+Official release (LGPL 2.1):
+
+  https://download-mirror.savannah.gnu.org/releases/xforms/xforms-1.2.4.tar.gz
+
+```bash
+# from the motif-on-qt top level
+curl -L -o /tmp/xforms-1.2.4.tar.gz \
+  https://download-mirror.savannah.gnu.org/releases/xforms/xforms-1.2.4.tar.gz
+tar xzf /tmp/xforms-1.2.4.tar.gz -C /tmp
+# copy library sources (keep our config.h and this README)
+cp -a /tmp/xforms-1.2.4/lib/* src/xforms/
+# restore our minimal config (or merge)
+# cp path/to/our/config.h src/xforms/config.h
+cp /tmp/xforms-1.2.4/COPYING.LIB /tmp/xforms-1.2.4/Copyright src/xforms/
+```
+
+Public headers live under `src/xforms/include/` (they become the installed
+`<forms.h>` / individual class headers once packaging is added).
+
+## Build notes (future CMake)
+
+- Compile the `.c` files in this directory (and `private/` is private headers only).
+- Include path: `src/xforms` and `src/xforms/include` plus the project’s
+  `include/` (our X11 headers).
+- Link against the motif-on-qt static archive (which supplies Xlib, Xpm, etc.).
+- Optional: also pull in `image/` from the tarball if flimage support is wanted.
+- Do **not** patch the XForms sources for missing Xlib; fix gaps in
+  `src/xlib.cpp` (same rule as Athena).
+
+## Minimal config.h
+
+The supplied `config.h` is a hand-written stub sufficient for an initial
+compile against a modern Unix + our Xlib. Expand `#define`s as the linker
+or compiler report missing features.
+
+## License
+
+XForms is LGPL 2.1 (see COPYING.LIB once imported). Compatible with the
+project’s own LGPL 2.1+.
+
+## Next steps after sources are present
+
+1. Add a CMake option (e.g. `MQ_BUILD_XFORMS`) and a static library target.
+2. Resolve any missing Xlib symbols that the real sources call.
+3. Bridge `fl_do_forms` / the XForms event model to the Qt event loop
+   (or run it on top of our XEvent delivery).
+4. Smoke-test with the demos from the tarball under
+   `QT_QPA_PLATFORM=offscreen MOTIFQT_AUTOQUIT=…`.

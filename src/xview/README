@@ -1,0 +1,55 @@
+# XView (OPEN LOOK) — Athena-style import for motif-on-qt
+
+This directory is the place for an Athena-style import of the XView toolkit
+sources so they can be compiled against motif-on-qt’s Xlib-on-Qt layer.
+
+## Status (transition)
+
+- **Goal**: run unmodified (or minimally adapted) XView library sources on our
+  Xlib, then progressively replace packages with thin Qt shims
+  (see `docs/xview-xforms-shims.md`).
+- **Current**: scaffolding only. XView is substantially larger than XForms;
+  vendor the sources here when ready.
+
+## Recommended source trees
+
+XView 3.2p1.4 and derivatives (permissive / original Sun terms + modern ports):
+
+- https://github.com/ElCoyote27/XView  
+  (maintained for modern RHEL/Fedora; contains libxview + libolgx)
+- https://github.com/ggodd/xview-64bit  
+  (64-bit port based on the classic 3.2p1.4 sources)
+- Classic SourceForge / OpenWindows trees also exist.
+
+Typical layout after unpacking:
+
+```
+lib/libxview/     # core packages (panel, menu, canvas, frame, notify, …)
+lib/libolgx/      # OPEN LOOK graphics primitives
+```
+
+Copy the library sources into this directory (or into `src/xview/libxview` and
+`src/xview/libolgx`) and keep a local `config` / Imake-to-CMake translation.
+
+## Build notes (future)
+
+- XView is **not** Xt-based; it talks Xlib directly and has its own Notifier.
+- Include the project’s `include/` X11 headers and link the motif-on-qt archive.
+- Missing Xlib surface → fix in `src/xlib.cpp`, do not patch XView sources.
+- Notifier must be bridged to the Qt event loop (timeouts, fds, X events).
+- libolgx can start as the real sources (drawing through our Xlib) and later
+  gain a Qt-style face option analogous to `xaw_qt.cpp`.
+
+## License
+
+Respect the license files that ship with the chosen source tree. Most modern
+ports document the original Sun / OpenWindows terms plus any additional
+patches.
+
+## Next steps after sources are present
+
+1. CMake option `MQ_BUILD_XVIEW` and static library target(s).
+2. Minimal Notifier ↔ Qt event-loop bridge.
+3. Smoke-test a simple FRAME + PANEL client under the existing
+   `MOTIFQT_SCRIPT` / offscreen harness.
+4. Grow the set of packages that have thin Qt shims.
