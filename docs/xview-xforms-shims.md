@@ -21,6 +21,17 @@ mappings.
 Any gaps that surface when linking real XView or XForms sources against the current
 Xlib layer become high-priority Xlib work; the same discipline used for Athena applies.
 
+## Athena-style import scaffolding (in tree)
+
+| Toolkit | Location            | Status |
+|---------|---------------------|--------|
+| XForms  | `src/xforms/`       | README + minimal `config.h`; drop official 1.2.4 lib sources here |
+| XView   | `src/xview/`        | README with recommended source trees and layout |
+
+See the READMEs in those directories for exact vendor steps. Once the sources are
+present, add CMake options (`MQ_BUILD_XFORMS`, `MQ_BUILD_XVIEW`) following the
+Athena pattern and start resolving missing Xlib symbols.
+
 ## Athena (Xaw) — current state and target
 
 **Current (transition):** Genuine libXaw 1.0.16 + libXmu sources under `src/xaw/` and
@@ -67,7 +78,7 @@ packages, and attribute lists (`xv_create`, `xv_set`, `xv_get`, …). The Notifi
 the Xt main loop. Graphics primitives live in libolgx.
 
 Sources are available (OpenWindows-derived trees; modern ports such as ElCoyote27/XView).
-License is permissive.
+License is permissive. Scaffolding lives under `src/xview/`.
 
 ### Core packages and suggested Qt mappings
 
@@ -117,7 +128,7 @@ surface and to run existing clients while the thin shims are built package-by-pa
 XForms is a pure-Xlib toolkit with a simple C API: forms contain objects of many classes.
 It has its own event loop (`fl_do_forms` / callbacks) and an extensible object-class
 architecture. Sources (1.2.4) are LGPL and still packaged; experimental Wayland ports via
-Xlib shims already exist.
+Xlib shims already exist. Scaffolding + minimal `config.h` live under `src/xforms/`.
 
 ### Core object classes and suggested Qt mappings
 
@@ -153,14 +164,14 @@ target for a first complete thin-shim library after the Athena core.
 
 ## Recommended sequence
 
-1. **Xlib completeness** — any missing calls discovered by linking real XView / XForms /
-   remaining Athena code.
-2. **Athena thin-shim conversion** of the already-faced widgets (Label, Command, Toggle,
+1. **Vendor the sources** into `src/xforms/` and `src/xview/` (see the READMEs there).
+2. **Xlib completeness** — any missing calls discovered by linking the real sources.
+3. **Athena thin-shim conversion** of the already-faced widgets (Label, Command, Toggle,
    MenuButton, Scrollbar, SimpleMenu, …) while keeping foreign-class fallback for the rest.
-3. **XForms prototype** — form + button / input / slider / browser; then grow the object set.
-4. **XView prototype** — FRAME + PANEL + a handful of panel items + CANVAS; Notifier bridge;
+4. **XForms prototype** — form + button / input / slider / browser; then grow the object set.
+5. **XView prototype** — FRAME + PANEL + a handful of panel items + CANVAS; Notifier bridge;
    then menus, notices, textsw.
-5. Packaging: optional components, linker scripts / pkg-config entries following the Motif /
+6. Packaging: optional components, linker scripts / pkg-config entries following the Motif /
    Xaw pattern, so unmodified clients can be built with the same `motif-on-qt-env` style
    wrappers.
 
@@ -183,6 +194,7 @@ criterion, exactly as for Motif and Athena.
 - `docs/target-applications.md` — clients that exercise the current Motif/Athena support
 - `src/xaw_qt.cpp` — example of Qt faces on top of foreign Athena classes
 - `src/xt_foreign.cpp` — how program-defined (and currently Athena) classes are driven
+- `src/xforms/README`, `src/xview/README` — vendor steps for the Athena-style imports
 
 This analysis is intended as a living design note; update the mapping tables as individual
 packages/objects are implemented.
