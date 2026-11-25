@@ -1,63 +1,40 @@
-# XForms (Forms Library) — Athena-style import for motif-on-qt
+# XForms-on-Qt (thin shim)
 
-This directory holds (or will hold) the genuine XForms 1.2.4 library sources,
-imported the same way libXaw lives under `src/xaw/`.
+The primary path is the same as XView: a public C API over Qt widgets, not a
+build of the XForms 1.2 sources. This is a **source-level subset**, not the
+1.2 ABI. The header is [include/forms.h](../../include/forms.h).
 
-## Status (transition)
+## Objects
 
-- **Goal**: compile the original XForms sources against motif-on-qt’s Xlib-on-Qt
-  (and eventually thin-shim the public API over Qt widgets, see
-  `docs/xview-xforms-shims.md`).
-- **Current**: scaffolding + minimal `config.h`. Drop the official sources here
-  and wire them into the top-level CMakeLists when ready.
+| Call | Qt |
+| --- | --- |
+| `fl_bgn_form` | `QWidget` |
+| `fl_add_box` / `fl_add_frame` | `QFrame` |
+| `fl_add_labelframe` | `QGroupBox` |
+| `fl_add_button` / `fl_add_lightbutton` | `QPushButton` |
+| `fl_add_text` | `QLabel` |
+| `fl_add_input` | `QLineEdit` or `QPlainTextEdit` |
+| `fl_add_slider` | `QSlider` |
+| `fl_add_browser` | `QListWidget` |
+| `fl_add_choice` | `QComboBox` |
+| `fl_do_forms` | `QApplication::exec` |
+| `fl_add_timeout` | `QTimer::singleShot` |
 
-## How to import the sources
+Geometry is absolute, origin top-left, as in XForms. An object with a
+callback does not return from `fl_do_forms`; an object without one does.
+`FL_OBJECT.spec` is private.
 
-Official release (LGPL 2.1):
-
-  https://download-mirror.savannah.gnu.org/releases/xforms/xforms-1.2.4.tar.gz
+## Build
 
 ```bash
-# from the motif-on-qt top level
-curl -L -o /tmp/xforms-1.2.4.tar.gz \
-  https://download-mirror.savannah.gnu.org/releases/xforms/xforms-1.2.4.tar.gz
-tar xzf /tmp/xforms-1.2.4.tar.gz -C /tmp
-# copy library sources (keep our config.h and this README)
-cp -a /tmp/xforms-1.2.4/lib/* src/xforms/
-# restore our minimal config (or merge)
-# cp path/to/our/config.h src/xforms/config.h
-cp /tmp/xforms-1.2.4/COPYING.LIB /tmp/xforms-1.2.4/Copyright src/xforms/
+cmake -B build && cmake --build build --target xforms-hello
+./build/xforms-hello
 ```
 
-Public headers live under `src/xforms/include/` (they become the installed
-`<forms.h>` / individual class headers once packaging is added).
+`MQ_BUILD_XFORMS=OFF` skips the library.
 
-## Build notes (future CMake)
+## Original sources
 
-- Compile the `.c` files in this directory (and `private/` is private headers only).
-- Include path: `src/xforms` and `src/xforms/include` plus the project’s
-  `include/` (our X11 headers).
-- Link against the motif-on-qt static archive (which supplies Xlib, Xpm, etc.).
-- Optional: also pull in `image/` from the tarball if flimage support is wanted.
-- Do **not** patch the XForms sources for missing Xlib; fix gaps in
-  `src/xlib.cpp` (same rule as Athena).
-
-## Minimal config.h
-
-The supplied `config.h` is a hand-written stub sufficient for an initial
-compile against a modern Unix + our Xlib. Expand `#define`s as the linker
-or compiler report missing features.
-
-## License
-
-XForms is LGPL 2.1 (see COPYING.LIB once imported). Compatible with the
-project’s own LGPL 2.1+.
-
-## Next steps after sources are present
-
-1. Add a CMake option (e.g. `MQ_BUILD_XFORMS`) and a static library target.
-2. Resolve any missing Xlib symbols that the real sources call.
-3. Bridge `fl_do_forms` / the XForms event model to the Qt event loop
-   (or run it on top of our XEvent delivery).
-4. Smoke-test with the demos from the tarball under
-   `QT_QPA_PLATFORM=offscreen MOTIFQT_AUTOQUIT=…`.
+`config.h` remains so the official 1.2.4 tree can still be dropped here as a
+behaviour oracle. It is not linked into `xforms-on-qt`. See the history of
+this file for the vendor commands.

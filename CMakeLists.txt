@@ -180,6 +180,24 @@ if (MQ_BUILD_XVIEW)
   endif ()
 endif ()
 
+# Initial XForms-on-Qt: source-level subset (not the 1.2 ABI). A form plus
+# box, frame, button, text, input, slider, browser and choice, on Qt widgets.
+option (MQ_BUILD_XFORMS "Build the initial XForms-on-Qt shim" ON)
+if (MQ_BUILD_XFORMS)
+  add_library (xforms-on-qt STATIC src/xforms/fl_api.cpp)
+  target_include_directories (xforms-on-qt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries (xforms-on-qt PUBLIC ${QT_WIDGETS})
+  target_compile_options (xforms-on-qt PRIVATE ${MQ_WARNINGS})
+  set_target_properties (xforms-on-qt PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+  if (MQ_BUILD_EXAMPLES)
+    add_executable (xforms-hello examples/xforms_hello.c)
+    target_include_directories (xforms-hello PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries (xforms-hello PRIVATE xforms-on-qt)
+  endif ()
+endif ()
+
 install (TARGETS motif-on-qt ARCHIVE DESTINATION ${MQ_INSTALL_LIBDIR})
 foreach (n ${MQ_LINK_NAMES})
   install (FILES ${MQ_STAGE}/lib${n}.so DESTINATION ${MQ_INSTALL_LIBDIR})

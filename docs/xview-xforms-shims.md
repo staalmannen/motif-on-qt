@@ -133,8 +133,14 @@ surface and to run existing clients while the thin shims are built package-by-pa
 
 XForms is a pure-Xlib toolkit with a simple C API: forms contain objects of many classes.
 It has its own event loop (`fl_do_forms` / callbacks) and an extensible object-class
-architecture. Sources (1.2.4) are LGPL and still packaged; experimental Wayland ports via
-Xlib shims already exist. Scaffolding + minimal `config.h` live under `src/xforms/`.
+architecture. Sources (1.2.4) are LGPL and still packaged.
+
+**Implementation started (thin shim, not a source import).** `include/forms.h` and
+`src/xforms/fl_api.cpp` cover a form plus box, frame, labelframe, button, lightbutton,
+text, input, slider, browser and choice, with `fl_do_forms` on the Qt event loop.
+Build with `cmake --build build --target xforms-hello`. This is a source-level subset,
+not the XForms 1.2 ABI. The old `config.h` is still there if a real tree is vendored
+later as an oracle.
 
 ### Core object classes and suggested Qt mappings
 
