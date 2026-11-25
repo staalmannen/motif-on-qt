@@ -28,9 +28,11 @@ Xlib layer become high-priority Xlib work; the same discipline used for Athena a
 | XForms  | `src/xforms/`       | README + minimal `config.h`; drop official 1.2.4 lib sources here |
 | XView   | `src/xview/`        | README with recommended source trees and layout |
 
-See the READMEs in those directories for exact vendor steps. Once the sources are
-present, add CMake options (`MQ_BUILD_XFORMS`, `MQ_BUILD_XVIEW`) following the
-Athena pattern and start resolving missing Xlib symbols.
+See the READMEs in those directories for exact vendor steps. The shims are built
+into `libmotif-on-qt.a` with the rest (one archive, link names `xview`, `olgx`,
+`forms`). They make their QApplication through `mq_ensure_app`, so one program
+can mix toolkits and the headless hooks (`MOTIFQT_AUTOQUIT`, `MOTIFQT_SCREENSHOT`,
+`MOTIFQT_SCRIPT`) work for them as for Motif and Athena.
 
 ## Athena (Xaw) — current state and target
 
@@ -82,7 +84,9 @@ large and not Xt-based, the primary path is Motif-style: public C calls over Qt.
 `include/xview/xview.h`, `src/xview/xv_api.cpp` and `src/xview/olgx.cpp` cover FRAME,
 PANEL (button, message, text, slider), CANVAS, MENU/MENUITEM, SCROLLBAR, `xv_notice`,
 and the common olgx drawing calls (box, button, choice, text, scrollbar, menu mark)
-on QPainter. Build with `cmake --build build --target xview-hello`. This is a
+on QPainter. It is part of `libmotif-on-qt.a`; `-lxview -lolgx` resolve to the
+same archive (link scripts, as for `-lXaw7`), and `examples/xview_hello.c` runs
+headless under ctest like the Motif programs. This is a
 source-level subset (our attribute numbers), not the Sun ABI. A real XView tree can
 still be kept aside as a behaviour oracle; it is not linked into the library.
 
@@ -138,7 +142,8 @@ architecture. Sources (1.2.4) are LGPL and still packaged.
 **Implementation started (thin shim, not a source import).** `include/forms.h` and
 `src/xforms/fl_api.cpp` cover a form plus box, frame, labelframe, button, lightbutton,
 text, input, slider, browser and choice, with `fl_do_forms` on the Qt event loop.
-Build with `cmake --build build --target xforms-hello`. This is a source-level subset,
+It is part of `libmotif-on-qt.a` (`-lforms` resolves to the archive), and
+`examples/xforms_hello.c` runs headless under ctest. This is a source-level subset,
 not the XForms 1.2 ABI. The old `config.h` is still there if a real tree is vendored
 later as an oracle.
 

@@ -34,7 +34,14 @@ set (MQ_SOURCES
   src/xt_foreign.cpp
   src/xaw_qt.cpp
   src/xpm.cpp
-  src/xim.cpp)
+  src/xim.cpp
+  # XView and XForms (source-level subsets of their APIs, not the Sun or
+  # XForms 1.2 ABIs) on Qt widgets; libolgx draws OPEN LOOK chrome with
+  # QPainter. They share the application (and the headless hooks) with
+  # Motif and Athena
+  src/xview/xv_api.cpp
+  src/xview/olgx.cpp
+  src/xforms/fl_api.cpp)
 
 # Xmu and the Athena widgets: the genuine MIT sources of libXmu 1.1.3 and
 # libXaw 1.0.16, running on our Xt like a program's own widget classes
@@ -83,7 +90,7 @@ endif ()
 # scripts that pull in the archive and its Qt dependencies, so Makefiles that
 # say -lXm -lXt -lX11 work unchanged with -L<libdir>. pkg-config files for
 # x11, xt and friends point configure scripts at the same place.
-set (MQ_LINK_NAMES Xm Xt X11 Xext Xmu Xmuu Xpm Xaw Xaw7 ICE SM Mrm)
+set (MQ_LINK_NAMES Xm Xt X11 Xext Xmu Xmuu Xpm Xaw Xaw7 ICE SM Mrm xview olgx forms)
 include (GNUInstallDirs)
 set (MQ_INSTALL_LIBDIR ${CMAKE_INSTALL_FULL_LIBDIR}/motif-on-qt)
 set (MQ_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_FULL_INCLUDEDIR}/motif-on-qt)
@@ -157,45 +164,6 @@ option (MQ_BUILD_EXAMPLES "Build the example Motif programs" ON)
 if (MQ_BUILD_EXAMPLES AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt)
   enable_testing ()
   add_subdirectory (examples)
-endif ()
-
-# Initial XView-on-Qt: source-level subset (not Sun ABI). FRAME, PANEL and
-# the common panel items, CANVAS, MENU and SCROLLBAR map onto Qt widgets.
-# libolgx draws OPEN LOOK chrome with QPainter (see src/xview/olgx.cpp).
-option (MQ_BUILD_XVIEW "Build the initial XView-on-Qt shim" ON)
-if (MQ_BUILD_XVIEW)
-  add_library (xview-on-qt STATIC
-    src/xview/xv_api.cpp
-    src/xview/olgx.cpp)
-  target_include_directories (xview-on-qt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries (xview-on-qt PUBLIC ${QT_WIDGETS})
-  target_compile_options (xview-on-qt PRIVATE ${MQ_WARNINGS})
-  set_target_properties (xview-on-qt PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-  if (MQ_BUILD_EXAMPLES)
-    add_executable (xview-hello examples/xview_hello.c)
-    target_include_directories (xview-hello PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries (xview-hello PRIVATE xview-on-qt)
-  endif ()
-endif ()
-
-# Initial XForms-on-Qt: source-level subset (not the 1.2 ABI). A form plus
-# box, frame, button, text, input, slider, browser and choice, on Qt widgets.
-option (MQ_BUILD_XFORMS "Build the initial XForms-on-Qt shim" ON)
-if (MQ_BUILD_XFORMS)
-  add_library (xforms-on-qt STATIC src/xforms/fl_api.cpp)
-  target_include_directories (xforms-on-qt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries (xforms-on-qt PUBLIC ${QT_WIDGETS})
-  target_compile_options (xforms-on-qt PRIVATE ${MQ_WARNINGS})
-  set_target_properties (xforms-on-qt PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-  if (MQ_BUILD_EXAMPLES)
-    add_executable (xforms-hello examples/xforms_hello.c)
-    target_include_directories (xforms-hello PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries (xforms-hello PRIVATE xforms-on-qt)
-  endif ()
 endif ()
 
 install (TARGETS motif-on-qt ARCHIVE DESTINATION ${MQ_INSTALL_LIBDIR})

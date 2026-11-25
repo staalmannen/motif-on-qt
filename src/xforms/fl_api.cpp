@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+void mq_ensure_app(int *argc, char **argv);   /* xt_core.cpp */
+
 namespace {
 
 struct Form {
@@ -39,9 +41,20 @@ static Form *current_form = nullptr;
 static FL_OBJECT *returned = nullptr;
 static int timeout_seq = 1;
 
+static int *prog_argc = nullptr;
+static char **prog_argv = nullptr;
+
+/* the application Motif on Qt makes (mq_ensure_app): one QApplication for
+   every toolkit in the program, with the headless hooks MOTIFQT_AUTOQUIT,
+   MOTIFQT_SCREENSHOT and MOTIFQT_SCRIPT */
 static QApplication *app()
 {
     if (!QApplication::instance()) {
+        mq_ensure_app(prog_argc, prog_argv);
+        if (QApplication::instance())
+            qApp->setQuitOnLastWindowClosed(true);   /* closing the form ends fl_do_forms */
+    }
+    if (!QApplication::instance()) {   /* no platform: Qt says why */
         static int argc = 1;
         static char name[] = "xforms";
         static char *argv[] = {name, nullptr};
@@ -130,8 +143,10 @@ static double slider_from_qt(FL_OBJECT *o, int v)
 
 } // namespace
 
-extern "C" Display *fl_initialize(int *, char **, const char *, FL_CMD_OPT *, int)
+extern "C" Display *fl_initialize(int *argc, char **argv, const char *, FL_CMD_OPT *, int)
 {
+    prog_argc = argc;
+    prog_argv = argv;
     app();
     return nullptr;
 }

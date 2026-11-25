@@ -29,6 +29,8 @@ QPainter *current_painter() { return g_paint; }
 QSize current_canvas_size() { return g_canvas; }
 }
 
+void mq_ensure_app(int *argc, char **argv);   /* xt_core.cpp */
+
 namespace {
 
 struct Obj;
@@ -79,9 +81,20 @@ static std::vector<Obj *> &all()
     return v;
 }
 
+static int prog_argc = 0;
+static char **prog_argv = nullptr;
+
+/* the application Motif on Qt makes (mq_ensure_app): one QApplication for
+   every toolkit in the program, with the headless hooks MOTIFQT_AUTOQUIT,
+   MOTIFQT_SCREENSHOT and MOTIFQT_SCRIPT */
 static QApplication *app()
 {
     if (!QApplication::instance()) {
+        mq_ensure_app(prog_argv ? &prog_argc : nullptr, prog_argv);
+        if (QApplication::instance())
+            qApp->setQuitOnLastWindowClosed(true);   /* closing the frame ends xv_main_loop */
+    }
+    if (!QApplication::instance()) {   /* no platform: Qt says why */
         static int argc = 1;
         static char name[] = "xview";
         static char *argv[] = {name, nullptr};
@@ -396,16 +409,14 @@ static Obj *as(Xv_object obj)
 
 extern "C" Xv_object xv_init(int first, ...)
 {
-    app();
-    if (first == 0)
-        return nullptr;
     va_list ap;
     va_start(ap, first);
-    if (first == XV_INIT_ARGS) {
-        (void)va_arg(ap, int);          /* argc */
-        (void)va_arg(ap, char **);      /* argv */
+    if (first == XV_INIT_ARGS) {   /* the program's arguments go to Qt (-platform ...) */
+        prog_argc = va_arg(ap, int);
+        prog_argv = va_arg(ap, char **);
     }
     va_end(ap);
+    app();
     return nullptr;
 }
 

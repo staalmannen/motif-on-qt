@@ -6,8 +6,10 @@ and the part of Xlib these programs use, are implemented on Qt. The Athena
 widgets, Xmu and the Xpm API come along, so programs that mix Motif with
 Athena widgets (DDD) or use Athena alone build too. In the future, the Athena
 widgets might be more deeply integrated in the thin shim over Qt infrastructure,
-similar to how Motif is implemented. Other similar Xlib widget toolkits like
-XView or XForms are not implemented yet, but also in scope. Programs run on any Qt
+similar to how Motif is implemented. XView and XForms have begun as thin
+shims over Qt too (source-level subsets of their APIs, see
+[docs/xview-xforms-shims.md](docs/xview-xforms-shims.md)), built into the
+same library: `-lxview -lolgx` and `-lforms` link it. Programs run on any Qt
 platform: Wayland, X11, Windows or macOS, or headless with `offscreen`.
 
 | Motif 2.3.8 on X11 | the same source on Qt 6 |
@@ -72,6 +74,25 @@ DDD with real Motif and libXaw on X11, for comparison:
 DDD registers its own resource converters (`@bf` font changes in its
 strings, its pixmap search path) and tests classes with the `XmIsXxx`
 macros of `XmP.h`; both work as with libXt and libXm.
+
+## Grace
+
+Grace 5.1.25 (xmgrace), the 2D plotting tool, built with its own
+`./configure && make` and its bundled Xbae matrix widget and T1lib. Xbae
+is a program-defined subclass of XmManager that draws its cells with Xlib
+and the Manager's shadow GCs; Grace's own Tab widget (the notebook in its
+dialogs) manages its pages by setting `core.managed` in their records; its
+text is T1lib glyphs put through bitmap clip masks. A plot, with real Motif
+on X11 for comparison:
+
+| Motif 2.3.8 on X11 | the same source on Qt 6 |
+| --- | --- |
+| ![](docs/screenshots/grace-motif.png) | ![](docs/screenshots/grace-qt.png) |
+
+The axis dialog on its Special page (user ticks in an Xbae matrix) and the
+font tool (a matrix of glyphs):
+
+![](docs/screenshots/grace-dialogs-qt.png)
 
 ## Athena widgets
 

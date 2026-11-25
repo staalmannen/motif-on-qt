@@ -407,9 +407,13 @@ bool mq_program_convert (Widget w, const char *from_type, XrmValue *from, const 
   return run_converter (it.value (), w, from, to);
 }
 
+/* set while Xt's own public converters run: a program may have registered
+   one of them (XtCvtStringToPixel) for the very conversion they ask for */
+bool mq_builtin_conversion = false;
+
 static bool program_convert_string (Widget w, const ResDef *d, const char *str, XtArgVal *out)
 {
-  if (converters ().isEmpty ()) return false;
+  if (mq_builtin_conversion || converters ().isEmpty ()) return false;
   unsigned size = d->size ? d->size : sizeof (XtArgVal);
   if (size > sizeof (XtArgVal)) return false;
   union { XtArgVal v; long l; int i; short s; char c; char bytes[sizeof (XtArgVal)]; } buf;

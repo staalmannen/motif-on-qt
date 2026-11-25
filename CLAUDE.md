@@ -29,6 +29,9 @@ quit"` (see docs/testing.md).
   `src/xpm.cpp` the Xpm API; `src/xim.cpp` input methods (XIM, XmIm);
   `src/xaw_qt.cpp` Qt style faces for Athena's buttons, labels, scroll bars
   and menus (behaviour stays libXaw's)
+- `src/xview/` (+ libolgx), `src/xforms/` thin XView / XForms shims on Qt
+  widgets (source-level API subsets), in the same archive; `include/xview`,
+  `include/olgx`, `include/forms.h`; app via `mq_ensure_app`
 - `examples/` Motif's own demos, unmodified; `tests/` our regression programs
 
 ## Conventions

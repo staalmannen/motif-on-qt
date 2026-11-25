@@ -16,5 +16,6 @@ MOTIFQT_1.0 {
     constraintWidgetClass; shellWidgetClass; overrideShellWidgetClass; wmShellWidgetClass;
     vendorShellWidgetClass; transientShellWidgetClass; topLevelShellWidgetClass;
     applicationShellWidgetClass; sessionShellWidgetClass;
+    xv_*; olgx_*; notify_start; notify_stop; fl_*;
   local: *;
 } MOTIFQT_0.0;

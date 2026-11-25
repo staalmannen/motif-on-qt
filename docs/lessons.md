@@ -142,6 +142,33 @@ Things that cost time once; check here before debugging something similar.
 - Rebuilding a program after the library changed: make does not see the
   installed archive change; remove the binary to relink.
 
+## Lessons from Grace and Xbae
+
+- Depth-1 pixmaps hold set bits as white. `createMaskFromColor` gives
+  white index 1 and `QBitmap::fromImage` maps white to color0, so masks
+  built that way select the clear bits: every GC clip mask, stipple and
+  shape mask was inverted. Build the QBitmap with explicit colours.
+- A dialog shell popped up by managing its child must be realized the way
+  `XtRealizeWidget` does it: `change_managed` bottom-up, then the realize
+  procs. Only flagging the shell as realized left program classes inside
+  dialogs without either.
+- A class may manage children by writing `core.managed` (Grace's Tab
+  keeps one page managed). Xt reads that field, so after a program's
+  `change_managed` the records are the truth.
+- Program subclasses of XmManager / XmPrimitive draw with the part's
+  GCs (`manager.top_shadow_GC` ...). They must exist, one per widget,
+  since programs change their clip rectangles.
+- Styles give text push buttons an 80 pixel minimum width (dialog
+  buttons). Motif sizes a push button from its label: rows of small
+  buttons (Grace's ZX ZY ...) were twice as wide, and NEdit's Find and
+  Cancel did not match real Motif.
+- Widget code calls Xt's converters directly (`XtCvtStringToPixel` in
+  Xbae); a program may also register one of them for the very conversion
+  it then asks for, so the built-in path must not call back into program
+  converters.
+- Grace's configure tests Motif with `XmRegisterConverters` and reads
+  `_XmVersionString`; Motif exports both without declaring the first.
+
 ## Build and link
 
 - Generated tables: names/types only defined in Motif's private headers

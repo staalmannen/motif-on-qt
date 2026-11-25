@@ -22,6 +22,24 @@
 void mq_dump_widgets ();
 void mq_save_windows (const QString &file);
 
+/* a widget by the text it shows: a button's or label's text, a window's
+   title (XView and XForms objects have labels, not Motif names) */
+static QString shown_text (QString t) { return t.remove ('&').trimmed (); }
+static QWidget *find_by_text (const QList<QWidget *> &scope, const QString &text)
+{
+  for (QWidget *r : scope) {
+    if (r->isWindow () && r->windowTitle () == text) return r;
+    QList<QWidget *> all = r->findChildren<QWidget *> ();
+    all.prepend (r);
+    for (QWidget *w : all) {
+      if (!w->isVisible ()) continue;
+      if (auto *b = qobject_cast<QAbstractButton *> (w); b && shown_text (b->text ()) == text) return w;
+      if (auto *l = qobject_cast<QLabel *> (w); l && shown_text (l->text ()) == text) return w;
+    }
+  }
+  return nullptr;
+}
+
 static QWidget *find_widget (const QString &spec)
 {
   QStringList path = spec.split ('.');
@@ -37,6 +55,7 @@ static QWidget *find_widget (const QString &spec)
       for (QWidget *k : kids) if (k->isVisible ()) { found = k; break; }
       if (found) break;
     }
+    if (!found) found = find_by_text (scope, part);
     if (!found) return nullptr;
     scope = { found };
   }
@@ -69,6 +88,33 @@ static void send_keys (QWidget *target, const QKeySequence &seq)
   }
 }
 
+/* a menu bar item by its labels (File/Open...), mnemonic markers ignored;
+   each menu on the way is told it is about to show (programs fill menus
+   then, Motif's cascading callbacks) */
+static QString plain_label (QString t) { return t.remove ('&').trimmed (); }
+static QAction *find_menu_action (const QStringList &path)
+{
+  for (QWidget *top : QApplication::topLevelWidgets ()) {
+    if (!top->isVisible ()) continue;
+    for (QMenuBar *bar : top->findChildren<QMenuBar *> ()) {
+      QList<QAction *> level = bar->actions ();
+      QAction *found = nullptr;
+      for (const QString &part : path) {
+        found = nullptr;
+        for (QAction *act : level)
+          if (plain_label (act->text ()) == plain_label (part)) { found = act; break; }
+        if (!found) break;
+        if (found->menu ()) {
+          Q_EMIT found->menu ()->aboutToShow ();
+          level = found->menu ()->actions ();
+        }
+      }
+      if (found) return found;
+    }
+  }
+  return nullptr;
+}
+
 static void run_step (QStringList &steps)
 {
   while (!steps.isEmpty ()) {
@@ -79,7 +125,7 @@ static void run_step (QStringList &steps)
     /* input may open a modal loop (a dialog the program runs until it is
      * closed, as NEdit's Open does): the rest of the script is scheduled
      * first, so it goes on inside that loop */
-    if (cmd == "key" || cmd == "click" || cmd == "type" || cmd == "drag") {
+    if (cmd == "key" || cmd == "click" || cmd == "type" || cmd == "drag" || cmd == "menu") {
       QStringList rest = steps;
       steps.clear ();
       QTimer::singleShot (0, qApp, [rest] () mutable { run_step (rest); });
@@ -145,6 +191,11 @@ static void run_step (QStringList &steps)
       QInputMethodEvent e (cmd == "preedit" ? text : QString (), {});
       if (cmd == "commit") e.setCommitString (text);
       QApplication::sendEvent (t, &e);
+    } else if (cmd == "menu") {
+      QString path = step.mid (4).trimmed ();
+      QAction *act = find_menu_action (path.split ('/'));
+      if (!act || !act->isEnabled ()) fprintf (stderr, "script: no menu item: %s\n", qPrintable (path));
+      else act->trigger ();
     } else if (cmd == "shot") {
       mq_save_windows (a.value (0));
     } else if (cmd == "dump") {
