@@ -77,7 +77,9 @@ struct flobjs_ {
 #define FL_NORMAL_TEXT    0
 
 typedef struct { int dummy; } FL_CMD_OPT;
-typedef struct { int dummy; } Display;
+/* X's Display, declared as Xlib (and Qt's X11 platform header) declare it,
+   so programs that include <X11/Xlib.h> too, and Qt, agree */
+typedef struct _XDisplay Display;
 
 Display *fl_initialize(int *argc, char *argv[], const char *appclass,
                        FL_CMD_OPT *opt, int nopt);
