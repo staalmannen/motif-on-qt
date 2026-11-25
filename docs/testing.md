@@ -31,11 +31,27 @@ pixels stay on the root window).
 - `MOTIFQT_SCRIPT="wait 1500; click find; type text hello; key text Return;
   shot out.png; quit"` - steps: `wait <ms>`, `key [<widget>] <keys>`
   (QKeySequence syntax), `click <widget> [button] [x y]`,
-  `drag <widget> x1 y1 x2 y2`, `type <widget> <text>`, `preedit <widget> <text>`
+  `drag <widget> x1 y1 x2 y2`, `menu File/Open...` (a menu bar item by its
+  labels), `type <widget> <text>`, `preedit <widget> <text>`
   and `commit <widget> <text>` (input method events), `shot <png>`, `dump`,
   `quit`. Widgets are found by Motif name, optionally as a path (`a.b`).
 
 ctest runs the examples and `tests/` headless (`ctest --test-dir build`).
+
+## Grace
+
+Configure with `--with-bundled-xbae --with-bundled-t1lib --disable-pdfdrv
+--disable-netcdf --without-fftw --disable-xmhtml` and
+`--x-includes/--x-libraries` pointing at Motif on Qt, under
+`motif-on-qt-env`. Run from the build tree with `GRACE_HOME=$PWD`; a data
+file on the command line is plotted, and the dialogs open with `menu`:
+
+```bash
+MOTIFQT_SCRIPT="wait 2000; menu Plot/Axis properties...; click tab 1 310 14; shot axis.png; quit" ./src/xmgrace data.dat
+```
+
+(the click selects the Special tab, drawn by Grace's own Tab widget). The
+reference is Ubuntu's `grace` package under Xvfb.
 
 ## Memory
 

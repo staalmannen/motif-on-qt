@@ -70,6 +70,25 @@ DDD registers its own resource converters (`@bf` font changes in its
 strings, its pixmap search path) and tests classes with the `XmIsXxx`
 macros of `XmP.h`; both work as with libXt and libXm.
 
+## Grace
+
+Grace 5.1.25 (xmgrace), the 2D plotting tool, built with its own
+`./configure && make` and its bundled Xbae matrix widget and T1lib. Xbae
+is a program-defined subclass of XmManager that draws its cells with Xlib
+and the Manager's shadow GCs; Grace's own Tab widget (the notebook in its
+dialogs) manages its pages by setting `core.managed` in their records; its
+text is T1lib glyphs put through bitmap clip masks. A plot, with real Motif
+on X11 for comparison:
+
+| Motif 2.3.8 on X11 | the same source on Qt 6 |
+| --- | --- |
+| ![](docs/screenshots/grace-motif.png) | ![](docs/screenshots/grace-qt.png) |
+
+The axis dialog on its Special page (user ticks in an Xbae matrix) and the
+font tool (a matrix of glyphs):
+
+![](docs/screenshots/grace-dialogs-qt.png)
+
 ## Athena widgets
 
 The Athena widgets are libXaw 1.0.16's own sources, unmodified, running on

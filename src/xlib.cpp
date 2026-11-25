@@ -340,6 +340,22 @@ Pixmap mq_pixmap_from_image (const QImage &img) { return new_pixmap (img.convert
 /* a depth-1 pixmap: white pixels are 1 */
 Pixmap mq_bitmap_from_image (const QImage &img) { return new_pixmap (img.convertToFormat (QImage::Format_RGB32), 1); }
 
+/* the 1 bits of a depth-1 pixmap (stored white on black) as a QBitmap
+ * whose color1 pixels they are - for clip masks, stipples and shapes.
+ * (createMaskFromColor gives white index 1 and QBitmap::fromImage maps
+ * white to color0: that inverted every mask.) */
+static QBitmap mq_set_bits (const QImage &img)
+{
+  QImage m (img.size (), QImage::Format_MonoLSB);
+  m.setColor (0, QColor (Qt::color0).rgb ());   /* white */
+  m.setColor (1, QColor (Qt::color1).rgb ());   /* black */
+  m.fill (0);
+  for (int y = 0; y < img.height (); y++)
+    for (int x = 0; x < img.width (); x++)
+      if ((img.pixel (x, y) & 0xffffff) != 0) m.setPixel (x, y, 1);
+  return QBitmap::fromImage (m);
+}
+
 /* ======================================================================
  * Painting with a GC
  * ====================================================================== */
@@ -393,8 +409,7 @@ public:
     if ((gc->v.fill_style == FillTiled) && gc->v.tile) brush.setTextureImage (drawables ().value (gc->v.tile).image);
     else if ((gc->v.fill_style == FillStippled || gc->v.fill_style == FillOpaqueStippled) && gc->v.stipple) {
       QImage st = drawables ().value (gc->v.stipple).image;
-      QBitmap mask = QBitmap::fromImage (st.createMaskFromColor (QColor (Qt::black).rgb (), Qt::MaskOutColor));
-      brush = QBrush (fg, mask);
+      brush = QBrush (fg, mq_set_bits (st));
     }
     p.setBrush (fill ? brush : QBrush (Qt::NoBrush));
     if (gc->has_clip_rects && !gc->clip_rects.isEmpty ()) {
@@ -404,8 +419,7 @@ public:
     } else if (gc->v.clip_mask && gc->v.clip_mask != None) {
       QImage m = drawables ().value (gc->v.clip_mask).image;
       if (!m.isNull ()) {
-        QBitmap bm = QBitmap::fromImage (m.createMaskFromColor (QColor (Qt::black).rgb (), Qt::MaskOutColor));
-        p.setClipRegion (QRegion (bm).translated (gc->v.clip_x_origin, gc->v.clip_y_origin));
+        p.setClipRegion (QRegion (mq_set_bits (m)).translated (gc->v.clip_x_origin, gc->v.clip_y_origin));
       }
     }
     /* HiDPI: a line of odd width (thin lines are 1) covers the pixels from
@@ -697,6 +711,20 @@ int XVendorRelease (Display * a0_) { MQ_FWD (XVendorRelease, a0_, a0_); return 1
 int XProtocolVersion (Display * a0_) { MQ_FWD (XProtocolVersion, a0_, a0_); return 11; }
 int XProtocolRevision (Display * a0_) { MQ_FWD (XProtocolRevision, a0_, a0_); return 0; }
 long XMaxRequestSize (Display * a0_) { MQ_FWD (XMaxRequestSize, a0_, a0_); return 65535; }
+/* drawing goes to Qt, which has no request size limit: answer as a server
+   with BIG-REQUESTS does (programs size their polyline batches by it) */
+long XExtendedMaxRequestSize (Display * a0_) { MQ_FWD (XExtendedMaxRequestSize, a0_, a0_); return 4194303; }
+/* the depths images and pixmaps come in: bitmaps, and the 24-bit visual
+   stored as 32 bits a pixel (what XCreateImage and XPutImage use) */
+XPixmapFormatValues *XListPixmapFormats (Display *d, int *count)
+{
+  MQ_FWD (XListPixmapFormats, d, d, count);
+  auto *f = (XPixmapFormatValues *) malloc (2 * sizeof (XPixmapFormatValues));
+  f[0] = { 1, 1, 32 };
+  f[1] = { 24, 32, 32 };
+  if (count) *count = 2;
+  return f;
+}
 VisualID XVisualIDFromVisual (Visual *v) { return v ? v->visualid : 0; }
 int XFlush (Display * a0_) { MQ_FWD (XFlush, a0_, a0_); return 0; }
 int XSync (Display * a0_, Bool a1_) { MQ_FWD (XSync, a0_, a0_, a1_); QCoreApplication::processEvents (); return 0; }
@@ -2026,7 +2054,7 @@ void XShapeCombineMask (Display * a0_, Window dest, int a2_, int x, int y, Pixma
   if (src == None) { qw->clearMask (); return; }
   QImage img = drawables ().value (src).image;
   if (img.isNull ()) return;
-  QRegion r (QBitmap::fromImage (img.createMaskFromColor (QColor (Qt::black).rgb (), Qt::MaskOutColor)));
+  QRegion r (mq_set_bits (img));
   r.translate (x, y);
   qw->setMask (op == ShapeSet || qw->mask ().isEmpty () ? r : qw->mask () + r);
 }
@@ -2360,6 +2388,30 @@ static int set_extents (XFontSet set, const QString &t, XRectangle *ink, XRectan
   return w;
 }
 
+/* one rectangle per character (code point), placed along the line */
+static Status set_per_char (XFontSet set, const QString &t, XRectangle *ink, XRectangle *logical, int size,
+                            int *num_chars, XRectangle *overall_ink, XRectangle *overall_logical)
+{
+  QFont f = mq_font_for (set ? set->fs->fid : 0);
+  short top = (short) (set ? -set->fs->ascent : 0);
+  unsigned short height = (unsigned short) (set ? set->fs->ascent + set->fs->descent : 0);
+  QList<uint> chars = t.toUcs4 ();
+  if (num_chars) *num_chars = chars.size ();
+  if (chars.size () > size) return 0;   /* as Xlib: the arrays are too small */
+  int x = 0;
+  for (int i = 0; i < chars.size (); i++) {
+    int w = x_text_width (f, QString::fromUcs4 ((const char32_t *) &chars[i], 1));
+    XRectangle r = { (short) x, top, (unsigned short) w, height };
+    if (ink) ink[i] = r;
+    if (logical) logical[i] = r;
+    x += w;
+  }
+  XRectangle all = { 0, top, (unsigned short) x, height };
+  if (overall_ink) *overall_ink = all;
+  if (overall_logical) *overall_logical = all;
+  return 1;
+}
+
 static void set_draw (Drawable d, XFontSet set, GC gc, int x, int y, const QString &t, bool image)
 {
   if (!set || !gc) return;
@@ -2376,6 +2428,21 @@ int Xutf8TextEscapement (XFontSet set, _Xconst char *s, int len) { return set_wi
 int XmbTextExtents (XFontSet set, _Xconst char *s, int len, XRectangle *ink, XRectangle *logical) { return set_extents (set, mq_mb_decode (s, len), ink, logical); }
 int XwcTextExtents (XFontSet set, _Xconst wchar_t *s, int len, XRectangle *ink, XRectangle *logical) { return set_extents (set, wc_string (s, len), ink, logical); }
 int Xutf8TextExtents (XFontSet set, _Xconst char *s, int len, XRectangle *ink, XRectangle *logical) { return set_extents (set, QString::fromUtf8 (s, len), ink, logical); }
+Status XmbTextPerCharExtents (XFontSet set, _Xconst char *s, int len, XRectangle *ink, XRectangle *logical, int size,
+                              int *num_chars, XRectangle *overall_ink, XRectangle *overall_logical)
+{
+  return set_per_char (set, mq_mb_decode (s, len), ink, logical, size, num_chars, overall_ink, overall_logical);
+}
+Status XwcTextPerCharExtents (XFontSet set, _Xconst wchar_t *s, int len, XRectangle *ink, XRectangle *logical, int size,
+                              int *num_chars, XRectangle *overall_ink, XRectangle *overall_logical)
+{
+  return set_per_char (set, wc_string (s, len), ink, logical, size, num_chars, overall_ink, overall_logical);
+}
+Status Xutf8TextPerCharExtents (XFontSet set, _Xconst char *s, int len, XRectangle *ink, XRectangle *logical, int size,
+                                int *num_chars, XRectangle *overall_ink, XRectangle *overall_logical)
+{
+  return set_per_char (set, QString::fromUtf8 (s, len), ink, logical, size, num_chars, overall_ink, overall_logical);
+}
 
 void XmbDrawString (Display *, Drawable d, XFontSet set, GC gc, int x, int y, _Xconst char *s, int len) { set_draw (d, set, gc, x, y, mq_mb_decode (s, len), false); }
 void XmbDrawImageString (Display *, Drawable d, XFontSet set, GC gc, int x, int y, _Xconst char *s, int len) { set_draw (d, set, gc, x, y, mq_mb_decode (s, len), true); }

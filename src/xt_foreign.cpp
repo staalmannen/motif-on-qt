@@ -534,6 +534,16 @@ void mq_foreign_change_managed (Widget parent)
   if (!R (parent)->klass->foreign || R (parent)->klass->place != foreign_place) return;
   mq_sync_children (parent);
   if (XtWidgetProc cm = reinterpret_cast<CompositeWidgetClass> (parent->core.widget_class)->composite_class.change_managed) cm (parent);
+  /* a class may manage and unmanage its children by setting core.managed
+     (Grace's Tab keeps only the shown page managed): Xt reads the field,
+     so that is the state, and what is shown follows it */
+  for (Widget c : R (parent)->children) {
+    if (!(R (c)->klass->kind & (K_WIDGET | K_GADGET)) || R (c)->destroying) continue;
+    bool managed = c->core.managed;
+    if (managed == R (c)->managed) continue;
+    R (c)->managed = managed;
+    mq_sync_visible (c);
+  }
 }
 
 static void foreign_place (Widget parent, Widget child)

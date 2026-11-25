@@ -498,6 +498,24 @@ class MqPushButton : public QPushButton {
 public:
   Widget w;
   explicit MqPushButton (Widget wd) : w (wd) { setAutoDefault (false); }
+  /* Motif sizes a push button from its label, margins and shadow; styles
+     such as Fusion make text buttons at least 80 pixels wide (dialog
+     buttons), which made rows of small buttons (Grace's ZX ZY ...) wide.
+     The style's padding stays, its minimum goes. */
+  QSize sizeHint () const override
+  {
+    QSize hint = QPushButton::sizeHint ();
+    if (text ().isEmpty ()) return hint;
+    QStyleOptionButton opt;
+    initStyleOption (&opt);
+    QSize contents = fontMetrics ().size (Qt::TextShowMnemonic, text ());
+    if (!icon ().isNull ()) contents += QSize (iconSize ().width () + 4, 0), contents.setHeight (qMax (contents.height (), iconSize ().height ()));
+    opt.text.clear ();
+    opt.icon = QIcon ();
+    QSize s = style ()->sizeFromContents (QStyle::CT_PushButton, &opt, contents, this);
+    return QSize (qMin (hint.width (), s.width ()), hint.height ());
+  }
+  QSize minimumSizeHint () const override { return sizeHint (); }
 protected:
   void mouseDoubleClickEvent (QMouseEvent *e) override
   {

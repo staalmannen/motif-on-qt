@@ -491,6 +491,11 @@ XmRepTypeEntry XmRepTypeGetRecord (XmRepTypeId) { return nullptr; }
 XmRepTypeId XmRepTypeGetId (String) { return XmREP_TYPE_INVALID; }
 String *XmRepTypeGetNameList (XmRepTypeId, Boolean) { return nullptr; }
 void XmRepTypeInstallTearOffModelConverter (void) {}
+/* Motif 1.x programs call this before creating widgets (configure scripts
+   test for Motif with it); Motif's own resource types are converted by
+   our Xt resource code, so there is nothing more to register. It is
+   exported by Motif without a declaration in its headers. */
+void XmRegisterConverters (void) {}
 
 /* ======================================================================
  * Clipboard (the system clipboard through Qt)
@@ -838,6 +843,9 @@ XmString XmeGetLocalizedString (char *, Widget, char *, String string)
 
 /* ---- globals and helpers Motif's private headers refer to ---- */
 int xmUseVersion = XmVersion;
+/* as Motif's Xm.c: programs read it to tell Motif from LessTif at run time */
+extern const char _XmVersionString[];
+const char _XmVersionString[] = XmVERSION_STRING;
 XmBaseClassExt *_Xm_fastPtr = nullptr;
 XrmQuark XmQmotif = 0;
 static struct InitQmotif { InitQmotif () { XmQmotif = XrmPermStringToQuark ("motif"); } } init_qmotif;

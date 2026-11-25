@@ -233,6 +233,7 @@ bool mq_isset (Widget w, const char *name);
 void mq_set (Widget w, const char *name, XtArgVal v);          /* store + apply, like XtSetValues */
 void mq_store (Widget w, const ResDef *def, XtArgVal v);
 bool mq_convert (Widget w, const ResDef *def, const char *str, XtArgVal *out);
+extern bool mq_builtin_conversion;   /* mq_convert skips the program's converters */
 const char *mq_lookup_db (Widget w, const char *name, const char *rclass);
 void mq_db_add_line (const char *line);
 int mq_enum_value (const char *name, bool *ok);

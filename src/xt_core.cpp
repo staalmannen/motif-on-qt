@@ -13,6 +13,7 @@
 void mq_resources_init (const char *app_name, const char *app_class, String *fallback);
 void mq_resources_from_db (Widget w, ArgList args, Cardinal n);
 void mq_free_resources (Widget w);
+void mq_free_part_gcs (Widget w);
 void mq_parse_command_line (XrmOptionDescRec *opts, Cardinal n, int *argc, char **argv);
 const char *mq_app_name ();
 const char *mq_app_class ();
@@ -315,6 +316,21 @@ void mq_sync_children (Widget w)
   }
 }
 
+/* a widget's own GC (programs change its clip rectangles), its colours
+   kept current */
+static void set_gc (GC *gc, Pixel fg, Pixel bg)
+{
+  if (!*gc) {
+    XGCValues v;
+    v.foreground = fg;
+    v.background = bg;
+    *gc = XCreateGC (mq_display, DefaultRootWindow (mq_display), GCForeground | GCBackground, &v);
+    return;
+  }
+  XSetForeground (mq_display, *gc, fg);
+  XSetBackground (mq_display, *gc, bg);
+}
+
 void mq_sync_core (Widget w)
 {
   MqRec *r = R (w);
@@ -369,6 +385,12 @@ void mq_sync_core (Widget w)
     m.bottom_shadow_color = mq_get (w, XmNbottomShadowColor);
     m.highlight_color = mq_get (w, XmNhighlightColor);
     m.shadow_thickness = mq_geti (w, XmNshadowThickness);
+    /* the GCs Motif's Manager initialize makes; program subclasses (Xbae's
+       matrix) draw their shadows with them */
+    set_gc (&m.background_GC, c.background_pixel, m.foreground);
+    set_gc (&m.highlight_GC, m.highlight_color, c.background_pixel);
+    set_gc (&m.top_shadow_GC, m.top_shadow_color, m.foreground);
+    set_gc (&m.bottom_shadow_GC, m.bottom_shadow_color, m.foreground);
   } else if (r->klass->kind & K_PRIMITIVE) {
     XmPrimitivePart &p = reinterpret_cast<XmPrimitiveWidget> (w)->primitive;
     p.foreground = mq_get (w, XmNforeground);
@@ -377,7 +399,26 @@ void mq_sync_core (Widget w)
     p.highlight_color = mq_get (w, XmNhighlightColor);
     p.shadow_thickness = mq_geti (w, XmNshadowThickness);
     p.highlight_thickness = mq_geti (w, XmNhighlightThickness);
+    set_gc (&p.highlight_GC, p.highlight_color, c.background_pixel);
+    set_gc (&p.top_shadow_GC, p.top_shadow_color, p.foreground);
+    set_gc (&p.bottom_shadow_GC, p.bottom_shadow_color, p.foreground);
   }
+}
+
+/* the Manager / Primitive GCs of a widget being destroyed */
+void mq_free_part_gcs (Widget w)
+{
+  if (!w || !(R (w)->klass->kind & K_WIDGET)) return;
+  GC *gcs[4] = {};
+  if (R (w)->klass->kind & K_MANAGER) {
+    XmManagerPart &m = reinterpret_cast<XmManagerWidget> (w)->manager;
+    gcs[0] = &m.background_GC; gcs[1] = &m.highlight_GC; gcs[2] = &m.top_shadow_GC; gcs[3] = &m.bottom_shadow_GC;
+  } else if (R (w)->klass->kind & K_PRIMITIVE) {
+    XmPrimitivePart &p = reinterpret_cast<XmPrimitiveWidget> (w)->primitive;
+    gcs[0] = &p.highlight_GC; gcs[1] = &p.top_shadow_GC; gcs[2] = &p.bottom_shadow_GC;
+  }
+  for (GC *g : gcs)
+    if (g && *g) { XFreeGC (mq_display, *g); *g = nullptr; }
 }
 
 /* ======================================================================
@@ -605,6 +646,11 @@ static void shell_apply (Widget w, const QByteArray &res)
   if (all || res == XmNallowShellResize) { /* Qt windows always follow their content */ }
 }
 
+extern "C" {   /* their definitions are in an extern "C" block */
+static void change_managed_rec (Widget w);
+static void realize_rec (Widget w);
+}
+
 static void shell_place (Widget shell, Widget child)
 {
   QWidget *win = mq_qw (shell), *cw = mq_qw (child);
@@ -615,7 +661,10 @@ static void shell_place (Widget shell, Widget child)
   /* Managing the child of a dialog shell pops the dialog up (Motif's rule). */
   if (mq_is (shell, xmDialogShellWidgetClass) && R (shell)->realized) mq_popup_shell (shell, true);
   else if (mq_is (shell, xmDialogShellWidgetClass) && R (shell)->parent) {
-    R (shell)->realized = true;
+    /* realized as XtRealizeWidget does it: the children's change_managed
+       first (program composites decide what they show), then realize */
+    change_managed_rec (shell);
+    realize_rec (shell);
     mq_popup_shell (shell, true);
   }
 }
@@ -893,6 +942,7 @@ static void free_rec (Widget w)
   for (int i = s_wm_protocols.size () - 1; i >= 0; i--)
     if (s_wm_protocols[i].first == w) s_wm_protocols.removeAt (i);
   s_shells.removeAll (w);
+  mq_free_part_gcs (w);
   mq_free_resources (w);
   if (R (w)->ext_free) R (w)->ext_free (R (w)->ext);
   mq_free_widget (w);
@@ -1760,6 +1810,127 @@ Boolean XtCvtStringToFont (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from
   } else to->addr = (XPointer) &f;
   to->size = sizeof (Font);
   return True;
+}
+
+/* Xt's public converters (XtTypeConverter): widget code such as Xbae
+ * calls them directly. The value goes where the caller points to->addr (the
+ * call fails, giving the size needed, if it is too small) or into static
+ * storage, as libXt does. String values come from the resource converter. */
+} /* extern "C" */
+static Boolean cvt_store (XrmValuePtr to, const void *value, unsigned size)
+{
+  static union { XtArgVal v; double d; char bytes[sizeof (double) > sizeof (XtArgVal) ? sizeof (double) : sizeof (XtArgVal)]; } store;
+  if (!to) return False;
+  if (to->addr) {
+    if (to->size < size) { to->size = size; return False; }
+    memcpy (to->addr, value, size);
+  } else {
+    memcpy (store.bytes, value, size);
+    to->addr = (XPointer) store.bytes;
+  }
+  to->size = size;
+  return True;
+}
+static Boolean cvt_string (Display *d, const char *to_type, unsigned size, XrmValuePtr from, XrmValuePtr to)
+{
+  if (!from || !from->addr) return False;
+  ResDef def { "", false, "", "", to_type, size, XtRString, 0, nullptr };
+  XtArgVal v = 0;
+  bool was = mq_builtin_conversion;
+  mq_builtin_conversion = true;
+  bool ok = mq_convert (nullptr, &def, (const char *) from->addr, &v);
+  mq_builtin_conversion = was;
+  if (!ok) {
+    XtDisplayStringConversionWarning (d, (const char *) from->addr, to_type);
+    return False;
+  }
+  switch (size) {   /* the value in the type's own size */
+  case sizeof (char): { char c = (char) v; return cvt_store (to, &c, size); }
+  case sizeof (short): { short s = (short) v; return cvt_store (to, &s, size); }
+  case sizeof (int): { int i = (int) v; return cvt_store (to, &i, size); }
+  default: return cvt_store (to, &v, size);
+  }
+}
+static Boolean cvt_number (Display *d, const char *to_type, XrmValuePtr from, long *out)
+{
+  if (!from || !from->addr) return False;
+  char *end = nullptr;
+  const char *s = (const char *) from->addr;
+  long n = strtol (s, &end, 0);
+  while (end && isspace ((unsigned char) *end)) end++;
+  if (end == s || (end && *end)) { XtDisplayStringConversionWarning (d, s, to_type); return False; }
+  *out = n;
+  return True;
+}
+extern "C" {
+
+Boolean XtCvtStringToPixel (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  return cvt_string (d, XtRPixel, sizeof (Pixel), from, to);
+}
+Boolean XtCvtStringToBool (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  return cvt_string (d, XtRBool, sizeof (Bool), from, to);
+}
+Boolean XtCvtStringToBoolean (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  return cvt_string (d, XtRBoolean, sizeof (Boolean), from, to);
+}
+Boolean XtCvtStringToFontStruct (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  return cvt_string (d, XtRFontStruct, sizeof (XFontStruct *), from, to);
+}
+Boolean XtCvtStringToFontSet (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  return cvt_string (d, XtRFontSet, sizeof (XFontSet), from, to);
+}
+Boolean XtCvtStringToFloat (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  if (!from || !from->addr) return False;
+  char *end = nullptr;
+  float f = strtof ((const char *) from->addr, &end);
+  if (end == (const char *) from->addr) { XtDisplayStringConversionWarning (d, (const char *) from->addr, XtRFloat); return False; }
+  return cvt_store (to, &f, sizeof f);
+}
+Boolean XtCvtStringToInt (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  long n;
+  if (!cvt_number (d, XtRInt, from, &n)) return False;
+  int i = (int) n;
+  return cvt_store (to, &i, sizeof i);
+}
+Boolean XtCvtStringToShort (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  long n;
+  if (!cvt_number (d, XtRShort, from, &n)) return False;
+  short v = (short) n;
+  return cvt_store (to, &v, sizeof v);
+}
+Boolean XtCvtStringToDimension (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  long n;
+  if (!cvt_number (d, XtRDimension, from, &n) || n < 0) return False;
+  Dimension v = (Dimension) n;
+  return cvt_store (to, &v, sizeof v);
+}
+Boolean XtCvtStringToUnsignedChar (Display *d, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  long n;
+  if (!cvt_number (d, XtRUnsignedChar, from, &n) || n < 0 || n > 255) return False;
+  unsigned char v = (unsigned char) n;
+  return cvt_store (to, &v, sizeof v);
+}
+Boolean XtCvtIntToPixel (Display *, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  if (!from || !from->addr) return False;
+  Pixel p = (Pixel) *(int *) from->addr;
+  return cvt_store (to, &p, sizeof p);
+}
+Boolean XtCvtIntToBoolean (Display *, XrmValuePtr, Cardinal *, XrmValuePtr from, XrmValuePtr to, XtPointer *)
+{
+  if (!from || !from->addr) return False;
+  Boolean b = *(int *) from->addr != 0;
+  return cvt_store (to, &b, sizeof b);
 }
 
 void XtStringConversionWarning (_Xconst char *from, _Xconst char *to_type)
