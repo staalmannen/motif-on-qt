@@ -34,7 +34,9 @@ pixels stay on the root window).
   `drag <widget> x1 y1 x2 y2`, `menu File/Open...` (a menu bar item by its
   labels), `type <widget> <text>`, `preedit <widget> <text>`
   and `commit <widget> <text>` (input method events), `shot <png>`, `dump`,
-  `quit`. Widgets are found by Motif name, optionally as a path (`a.b`).
+  `quit`. Widgets are found by Motif name, optionally as a path (`a.b`),
+  or else by the text they show (a button's or label's text, a window's
+  title): XView and XForms objects have labels, not names.
 
 ctest runs the examples and `tests/` headless (`ctest --test-dir build`).
 

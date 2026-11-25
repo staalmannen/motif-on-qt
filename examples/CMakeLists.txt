@@ -40,6 +40,19 @@ motif_program (xawfaces ${CMAKE_SOURCE_DIR}/tests/xawfaces.c)
 target_link_libraries (xawfaces PRIVATE Xaw7 Xmu)
 set_tests_properties (xawfaces PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;MOTIFQT_AUTOQUIT=10000")
 
+# XView and XForms programs, linked the way their Makefiles do
+motif_program (xview_hello ${CMAKE_SOURCE_DIR}/examples/xview_hello.c)
+target_link_libraries (xview_hello PRIVATE xview olgx)
+motif_program (xforms_hello ${CMAKE_SOURCE_DIR}/examples/xforms_hello.c)
+target_link_libraries (xforms_hello PRIVATE forms)
+# a scripted click on Quit must end them through their own callbacks
+# (notify_stop, fl_finish): the auto-quit comes after the test's timeout
+foreach (t xview_hello xforms_hello)
+  set_tests_properties (${t} PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;MOTIFQT_AUTOQUIT=20000;MOTIFQT_SCRIPT=wait 300\\;click Quit"
+    TIMEOUT 10)
+endforeach ()
+
 # The headers compile as C++17 (C++ Motif programs such as xpdf)
 add_executable (cxx-headers ${CMAKE_SOURCE_DIR}/tests/cxx-headers.cpp)
 target_include_directories (cxx-headers PRIVATE ${CMAKE_SOURCE_DIR}/include)

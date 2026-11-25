@@ -22,6 +22,24 @@
 void mq_dump_widgets ();
 void mq_save_windows (const QString &file);
 
+/* a widget by the text it shows: a button's or label's text, a window's
+   title (XView and XForms objects have labels, not Motif names) */
+static QString shown_text (QString t) { return t.remove ('&').trimmed (); }
+static QWidget *find_by_text (const QList<QWidget *> &scope, const QString &text)
+{
+  for (QWidget *r : scope) {
+    if (r->isWindow () && r->windowTitle () == text) return r;
+    QList<QWidget *> all = r->findChildren<QWidget *> ();
+    all.prepend (r);
+    for (QWidget *w : all) {
+      if (!w->isVisible ()) continue;
+      if (auto *b = qobject_cast<QAbstractButton *> (w); b && shown_text (b->text ()) == text) return w;
+      if (auto *l = qobject_cast<QLabel *> (w); l && shown_text (l->text ()) == text) return w;
+    }
+  }
+  return nullptr;
+}
+
 static QWidget *find_widget (const QString &spec)
 {
   QStringList path = spec.split ('.');
@@ -37,6 +55,7 @@ static QWidget *find_widget (const QString &spec)
       for (QWidget *k : kids) if (k->isVisible ()) { found = k; break; }
       if (found) break;
     }
+    if (!found) found = find_by_text (scope, part);
     if (!found) return nullptr;
     scope = { found };
   }
