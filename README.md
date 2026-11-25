@@ -4,7 +4,10 @@ Compile old Motif and Athena (Xaw) programs, unmodified, against Qt 6. No X
 server, no libXm, libXaw or libXt are needed at run time: the Xt/Motif C API,
 and the part of Xlib these programs use, are implemented on Qt. The Athena
 widgets, Xmu and the Xpm API come along, so programs that mix Motif with
-Athena widgets (DDD) or use Athena alone build too. Programs run on any Qt
+Athena widgets (DDD) or use Athena alone build too. In the future, the Athena
+widgets might be more deeply integrated in the thin shim over Qt infrastructure,
+similar to how Motif is implemented. Other similar Xlib widget toolkits like
+XView or XForms are not implemented yet, but also in scope. Programs run on any Qt
 platform: Wayland, X11, Windows or macOS, or headless with `offscreen`.
 
 | Motif 2.3.8 on X11 | the same source on Qt 6 |

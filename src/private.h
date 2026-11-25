@@ -273,8 +273,13 @@ void mq_window_flush (Window win);
 unsigned long mq_pixel (const QColor &c);
 QColor mq_color (unsigned long pixel);
 QPixmap mq_pixmap_qt (Pixmap p);
-/* Qt style faces for Athena's Label, Command, Toggle, MenuButton, Repeater
- * and Scrollbar: paints the widget, false if it keeps Xaw's drawing (xaw_qt.cpp) */
+/* Athena Label, Command, Toggle, MenuButton, Repeater, Scrollbar, SimpleMenu
+ * and menu entries. When this is true the canvas hosts a real Qt widget
+ * (xaw_qt.cpp) and Xaw's expose is not run. MOTIFQT_XAW_CLASSIC=1 keeps
+ * libXaw's drawing. mq_xaw_paint is the old style-paint path, unused once
+ * the widget face is active. */
+bool mq_xaw_qt_face (Widget w);
+void mq_xaw_sync (Widget w, QWidget *qw);
 bool mq_xaw_paint (Widget w, QWidget *qw, QPainter &p);
 /* the Qt font of an X font set (xlib.cpp) */
 QFont mq_fontset_qfont (XFontSet set);

@@ -1,0 +1,40 @@
+# XForms-on-Qt (thin shim)
+
+The primary path is the same as XView: a public C API over Qt widgets, not a
+build of the XForms 1.2 sources. This is a **source-level subset**, not the
+1.2 ABI. The header is [include/forms.h](../../include/forms.h).
+
+## Objects
+
+| Call | Qt |
+| --- | --- |
+| `fl_bgn_form` | `QWidget` |
+| `fl_add_box` / `fl_add_frame` | `QFrame` |
+| `fl_add_labelframe` | `QGroupBox` |
+| `fl_add_button` / `fl_add_lightbutton` | `QPushButton` |
+| `fl_add_text` | `QLabel` |
+| `fl_add_input` | `QLineEdit` or `QPlainTextEdit` |
+| `fl_add_slider` | `QSlider` |
+| `fl_add_browser` | `QListWidget` |
+| `fl_add_choice` | `QComboBox` |
+| `fl_do_forms` | `QApplication::exec` |
+| `fl_add_timeout` | `QTimer::singleShot` |
+
+Geometry is absolute, origin top-left, as in XForms. An object with a
+callback does not return from `fl_do_forms`; an object without one does.
+`FL_OBJECT.spec` is private.
+
+## Build
+
+```bash
+cmake -B build && cmake --build build --target xforms-hello
+./build/xforms-hello
+```
+
+`MQ_BUILD_XFORMS=OFF` skips the library.
+
+## Original sources
+
+`config.h` remains so the official 1.2.4 tree can still be dropped here as a
+behaviour oracle. It is not linked into `xforms-on-qt`. See the history of
+this file for the vendor commands.

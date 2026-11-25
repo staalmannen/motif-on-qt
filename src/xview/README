@@ -1,0 +1,39 @@
+# XView-on-Qt (thin shim)
+
+XView is implemented the same way Motif is: a public C API over Qt widgets,
+not by compiling the Sun sources. This is a **source-level subset**, not the
+Sun ABI. Attribute numbers and package ids are defined in
+[include/xview/xview.h](../../include/xview/xview.h).
+
+## Packages
+
+| Package | Qt |
+| --- | --- |
+| FRAME | QMainWindow |
+| PANEL | QWidget + QVBoxLayout |
+| PANEL_BUTTON | QPushButton |
+| PANEL_MESSAGE | QLabel |
+| PANEL_TEXT | QLineEdit |
+| PANEL_SLIDER | QSlider |
+| CANVAS | QWidget; `CANVAS_REPAINT_PROC` paints with QPainter |
+| MENU / MENUITEM | QMenu / QAction |
+| SCROLLBAR | QScrollBar |
+| `xv_notice` | QMessageBox |
+| `xv_main_loop` | `QApplication::exec` |
+
+## libolgx
+
+[include/olgx/olgx.h](../../include/olgx/olgx.h) and [olgx.cpp](olgx.cpp).
+Boxes, buttons, choice marks, text and scrollbars are drawn with QPainter
+using the OPEN LOOK light/dark bevel. During a canvas repaint the calls
+paint into that canvas; otherwise they paint an offscreen image.
+
+## Build
+
+```bash
+cmake -B build && cmake --build build --target xview-hello
+./build/xview-hello
+```
+
+`MQ_BUILD_XVIEW=OFF` skips the library. Real XView clients will not link
+until the attribute set and package list grow toward the Sun headers.

@@ -273,8 +273,11 @@ protected:
   {
     Window win = mq_window_for (w);
     QImage *img = mq_window_image (win, true);
+    /* A Qt widget is the face: do not run Xaw's expose (it would draw the
+     * classic look into the backing image underneath the widget). */
+    bool qt_face = R (w)->klass->foreign && mq_xaw_qt_face (w);
     QVariant pending = property ("_mq_expose");
-    if (!exposed || pending.isValid ()) {
+    if (!qt_face && (!exposed || pending.isValid ())) {
       QRect r = exposed ? pending.value<QRegion> ().boundingRect () : rect ();
       exposed = true;
       setProperty ("_mq_expose", QVariant ());
@@ -299,8 +302,8 @@ protected:
       img = mq_window_image (win, true);
     }
     QPainter p (this);
-    /* Athena widgets painted with the Qt style (their Xlib drawing above
-     * still keeps the backing image) */
+    if (qt_face) { mq_xaw_sync (w, this); return; }
+    /* Classic Athena drawing, or the style-paint fallback. */
     if (R (w)->klass->foreign && mq_xaw_paint (w, this, p)) return;
     if (img) {
       qreal d = img->devicePixelRatio ();
