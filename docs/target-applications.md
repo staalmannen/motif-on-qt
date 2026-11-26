@@ -112,3 +112,47 @@ When testing an unfamiliar Motif codebase against `motif-on-qt`:
    * *If matches exist*: Requires `libMrm` support before the UI can instantiate.
 3. **Check for Imake vs. Autotools**: Look for `Imakefile` vs. `configure.ac` / `CMakeLists.txt`.
 4. **Run headless geometry dump**: Launch with `QT_QPA_PLATFORM=offscreen MOTIFQT_AUTOQUIT=1000 MOTIFQT_DUMP=1` to verify that `XmForm` attachments and `RowColumn` packing resolve without zero-size collapse or overlapping widgets.
+
+---
+
+## 6. Later: CDE (Common Desktop Environment)
+
+Notes from a first look (not tried yet). CDE splits into applications,
+which fit motif-on-qt, and a desktop shell, which does not.
+
+**Applications - plausible.** dtpad, dtcalc, dtfile, dtterm, dthelpview,
+dticon, dtmail and the calendar are Motif/Xt/Xlib programs. They need
+CDE's own libraries (libDtSvc, libDtWidget, libDtHelp, libDtTerm) built
+from their genuine sources on our Xt, as libXaw is. Once qtified they are
+plain Qt programs, so they run natively on Wayland (no Xwayland).
+
+Expected trouble:
+- the Dt libraries use more Motif/Xt internals and Xlib than NEdit or
+  Grace did
+- cross-client communication: CDE apps talk through X properties,
+  selections and ToolTalk (libtt, mostly RPC, not X). Each qtified program
+  has its own private "X server", so property-based exchanges between
+  processes (dtstyle broadcasting colour changes, the action database
+  opening files in other apps) need a small replacement mechanism
+- programs that place their own windows, warp the pointer or grab globally
+  get less on Wayland, as any Wayland client does
+- several apps can run without ToolTalk (dtpad has a standalone mode); the
+  action system needs it
+
+**Desktop shell - not as CDE does it.**
+- dtwm is an X window manager: it manages other clients' windows on a real
+  X server. Our Xlib draws with Qt and has no X server behind it, so a
+  qtified dtwm has nothing to manage, on X11 or Wayland; on Wayland the
+  compositor is the window manager.
+- The Front Panel lives inside dtwm. It could be rebuilt as a standalone
+  panel (layer-shell, e.g. LayerShellQt, on compositors that support it);
+  workspace switching has no standard Wayland protocol.
+- dtlogin and dtsession: an ordinary display manager and a start script.
+
+**Suggested shape:** (1) qtify the CDE applications, which then run on any
+Wayland or X11 desktop; (2) optionally a CDE-style panel and theme on a
+Wayland compositor for the look and feel; (3) the full real desktop stays
+genuine CDE on X11.
+
+**First probe:** build libDtSvc plus dtcalc and dtpad (standalone) against
+motif-on-qt to measure the gaps before committing to more.
